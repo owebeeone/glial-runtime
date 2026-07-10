@@ -12,6 +12,9 @@ importers:
         specifier: file:../glade-decl-ts
         version: file:../glade-decl-ts
     devDependencies:
+      '@owebeeone/grip-core':
+        specifier: file:../grip-core
+        version: file:../grip-core
       '@types/node':
         specifier: ^22.20.1
         version: 22.20.1
@@ -167,6 +170,9 @@ packages:
 
   '@owebeeone/glade-decl@file:../glade-decl-ts':
     resolution: {directory: ../glade-decl-ts, type: directory}
+
+  '@owebeeone/grip-core@file:../grip-core':
+    resolution: {directory: ../grip-core, type: directory}
 
   '@rollup/rollup-android-arm-eabi@4.62.2':
     resolution: {integrity: sha512-6o7ZLZK+BeenkZCFNDXqpbjw9bD6nuWonvS/lwQJp7NoVVxm6p3qE7qQ5jGuBjiFsgvqjD8mZAU5oWxTmbOeOg==}
@@ -589,6 +595,10 @@ snapshots:
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
   '@owebeeone/glade-decl@file:../glade-decl-ts': {}
+
+  '@owebeeone/grip-core@file:../grip-core':
+    dependencies:
+      '@owebeeone/glade-decl': file:../glade-decl-ts
 
   '@rollup/rollup-android-arm-eabi@4.62.2':
     optional: true
