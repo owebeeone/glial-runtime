@@ -15,8 +15,10 @@ export {
   type StoredOp,
   type StoreEngine,
 } from "./store.ts";
+export { IndexedDbStoreEngine } from "./store_idb.ts";
 export { type InstanceEvent } from "./events.ts";
 export {
+  feedSession,
   SessionDestination,
   type OpBus,
   type Route,

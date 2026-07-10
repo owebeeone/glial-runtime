@@ -27,6 +27,7 @@
   "devDependencies": {
     "@owebeeone/grip-core": "file:../grip-core",
     "@types/node": "^22.20.1",
+    "fake-indexeddb": "^6.2.5",
     "typescript": "~5.8.3",
     "vitest": "^2.1.0"
   }

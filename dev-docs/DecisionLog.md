@@ -108,3 +108,73 @@ deferred with the text-crdt shape). Writes use an optional `handleGrip` exposing
 a `GlialTapController` (`set` = value op, `append` = log op; wrong-shape use
 throws), each routing `instance.write(encode(v))` through the binder — which
 ships it when connectivity is configured, else persists locally.
+
+---
+
+Gap found LIVE in glade's GC-3 per-binding cutover (glade/dev-docs/
+GladeCutoverNotes.md §RELOAD-RESUME GAP, 2026-07-10), worked around app-side
+there; resolved natively in glial here, together with the real GC-4 engine.
+
+## GAP-9 — reload-resume: own-origin ops must reach the session they were minted from
+
+A tab reload keeps its stable origin but rebuilds the client-ts session, and
+`SessionDestination`'s echo guard filtered own-origin ops out of the node
+replay ENTIRELY — so (a) the fresh session restarted its chain at seq 0, a fork
+the node correctly drops (observed data loss: a `selected README.md` op
+vanished), and (b) with the memory engine, own prior state never reached the
+assembly. The demo worked around both carrier-side. **Decision — glial owns
+both halves natively; the echo guard survives for assembly only:**
+
+1. `SessionDestination.subscribe` applies EVERY route-matched op to the session
+   (`applyRemote`, own-origin included — seq/prev/lamport resume off the node
+   replay; live echoes of our own publishes dedup in the session store) and
+   hands only remote-origin ops to the instance fold. Own writes fold at
+   `write()` time; reload-restore of own state is the persistent engine's job
+   (GAP-10) — replay is not a store.
+2. `attachGlade` hydrates the session from the instance's persisted ops through
+   the new optional `GladeDestination.hydrate(ops)`: `SessionDestination`
+   replays the wire-shaped ones (those carrying their glade address — locally
+   minted offline ops never rode the wire and are skipped), per origin in seq
+   order. With a persistent engine in the GC-4 slot this closes the
+   OFFLINE-from-boot fork (no replay to resume from): the wholesale stored
+   records ARE the chain heads, so no separate head persistence is needed.
+
+3. A route mounted only AFTER the node replay has passed used to miss it
+   (mount-before-subscribe as a wiring rule). Fixed natively: `feedSession
+   (session, bus)` absorbs EVERY inbound op into the session route-agnostically
+   (the carrier line the demo hand-rolled, now glial vocabulary), and `hydrate`
+   is TWO-WAY — it also returns the session's route ops the instance store
+   lacks (`SessionLike.dump?`), which `attachGlade` folds as backfill. A late
+   mount catches up from the session store — own-origin history included
+   (catch-up is not a live echo) — so mount order stops mattering.
+
+Residual, noted not fixed: two tabs sharing one profile's stable origin can
+still fork concurrently (origin allocation is the app's identity policy, not
+glial's; pre-existing, recorded with the cutover), and with the MEMORY engine
+an own-origin replay arriving after the mount still does not re-fold (the
+live-path echo guard) — own state then appears only at the next mount; the
+persistent engine (GAP-10) is the real answer there.
+
+## GAP-10 — GC-4 persistent engine: IndexedDB behind the unchanged sync seam; drop ≠ evict
+
+`StoreEngine.open` / `InstanceStore.append/all` are sync (a mount folds
+synchronously), but IndexedDB is async. **Decision:** `IndexedDbStoreEngine.open()`
+is an async FACTORY that preloads every persisted row into a per-instance
+write-through memory cache; after boot the seam stays sync (`append` writes
+through fire-and-forget — persistence may degrade on quota/private-mode, the
+app never blocks; `flush()` awaits in-flight writes for tests/teardown). Op
+records persist WHOLESALE (structured clone, key `[instanceKey, origin, seq]`,
+`put` = idempotent dedup), so a session op's wire fields (share/glade_id/key/
+refs/shape) survive reload and GAP-9's hydration re-validates the prev-hash
+chain exactly. The `IDBFactory` is injectable (fake-indexeddb in tests, browser
+`indexedDB` by default; tsconfig gains lib `DOM`).
+
+The eviction/retention question: the binder calls `drop` at refcount 0, and a
+persistent engine that deleted there would erase the user's history on every
+last unmount. So `drop` is a lifecycle SIGNAL whose meaning is the engine's
+retention call — memory frees; IndexedDB retains both rows and cache (a later
+remount must re-open synchronously, and the complete cache is what lets
+`purge` enumerate keys without DOM-only `IDBKeyRange`). Explicit deletion is
+`purge(instanceKey)`. Enforcing `decl.retention` (TTL/quota) is deferred: the
+engine is keyed by instanceKey and never sees the decl — wiring retention
+policy across the seam is a later GC-4 slice.

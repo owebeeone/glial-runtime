@@ -32,6 +32,11 @@ export interface GladeDestination {
   send(payload: Uint8Array): StoredOp;
   /** Subscribe to inbound remote ops; returns an unsubscribe. */
   subscribe(onOps: (ops: StoredOp[]) => void): () => void;
+  /** Optional two-way hydration at attach (GAP-9): absorb the instance's
+   *  persisted ops (a fresh session resumes its own chain even with no node
+   *  replay), and return any ops the destination already knows for this route
+   *  that the instance lacks — the backfill a late mount folds to catch up. */
+  hydrate?(ops: StoredOp[]): StoredOp[] | void;
 }
 
 type Listener = (e: InstanceEvent) => void;
@@ -72,7 +77,9 @@ export class BindingInstance {
   attachGlade(dest: GladeDestination): void {
     if (this.glade) return;
     this.glade = dest;
+    const backfill = dest.hydrate?.(this.store.all()); // persisted chain reaches the session first
     this.gladeOff = dest.subscribe((ops) => this.ingest(ops));
+    if (backfill?.length) this.ingest(backfill); // late mount catches up on absorbed replay
   }
 
   /** A consumer attaches: bump the refcount and hand it a refresh of the live

@@ -1,8 +1,8 @@
 // The store-engine seam — persistence is glial's, owned per binding instance
 // (GlialClientRuntime rule 1: "persistence first"; the client store is glial's,
 // not the tap's and not glade's). The in-memory engine is the degenerate
-// destination every instance gets for free; an IndexedDB engine slots in behind
-// this same interface later (GC-4) with no instance/binder change.
+// destination every instance gets for free; the IndexedDB engine (store_idb.ts)
+// slots in behind this same interface (GC-4) with no instance/binder change.
 
 export interface StoredOp {
   origin: string;
@@ -18,7 +18,9 @@ export interface InstanceStore {
   all(): StoredOp[];
 }
 
-/** Opens per-instance stores by a stable instance key; drops them on teardown. */
+/** Opens per-instance stores by a stable instance key. `drop` signals instance
+ *  TEARDOWN (last unmount) — whether that deletes anything is the engine's
+ *  retention call: memory frees, the persistent engine retains (GAP-10). */
 export interface StoreEngine {
   open(instanceKey: string): InstanceStore;
   drop(instanceKey: string): void;

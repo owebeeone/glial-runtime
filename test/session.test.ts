@@ -13,8 +13,8 @@ import { dirname, join } from "node:path";
 import type { BindingDecl } from "@owebeeone/glade-decl";
 import { GlialBinder } from "../src/binder.ts";
 import type { Fill, GladeDestination } from "../src/instance.ts";
-import type { StoredOp } from "../src/store.ts";
-import { SessionDestination, type OpBus, type SessionLike, type WireOp } from "../src/session.ts";
+import { MemoryStoreEngine, type StoredOp } from "../src/store.ts";
+import { feedSession, SessionDestination, type OpBus, type SessionLike, type WireOp } from "../src/session.ts";
 import type { InstanceEvent } from "../src/events.ts";
 import { fromUtf8, utf8 } from "../src/bytes.ts";
 
@@ -117,6 +117,118 @@ describe("mount -> session — real @glade/client-ts sessions converge", () => {
     mB.instance.write(utf8("from-b"));
     expect(fromUtf8(aVal!.value!)).toBe("from-b");
     expect(fromUtf8(bVal!.value!)).toBe("from-b");
+  });
+
+  it("reload-resume (GAP-9): own-origin replay reaches the session, not the fold; the next write continues the chain", () => {
+    const d = decl("notes.title", "value");
+    const route = { share: "app", gladeId: d.glade_id.id, shape: "value", key: new Uint8Array() };
+
+    // page life 1: origin "x" writes through a connected instance, tab goes away.
+    const mesh1 = new LocalMesh();
+    const sess1 = new Session(schema, "x") as unknown as SessionLike;
+    const binder1 = new GlialBinder(undefined, "x");
+    const m1 = binder1.mount(d, DOC1, undefined, { glade: new SessionDestination(sess1, mesh1, route) });
+    const first = m1.instance.write(utf8("first")) as WireOp;
+
+    // page life 2: SAME origin, fresh session/binder — the reload (store empty).
+    const mesh2 = new LocalMesh();
+    const sess2 = new Session(schema, "x") as unknown as SessionLike;
+    const binder2 = new GlialBinder(undefined, "x");
+    const events: InstanceEvent[] = [];
+    const m2 = binder2.mount(d, DOC1, (e) => events.push(e), { glade: new SessionDestination(sess2, mesh2, route) });
+    const eventsBeforeReplay = events.length;
+
+    // the node replay delivers the participant's OWN prior op off the bus.
+    mesh2.publish([first]);
+
+    // the echo guard still holds for assembly: own-origin replay does not re-fold...
+    expect(events.length).toBe(eventsBeforeReplay);
+
+    // ...but the session absorbed it: the next write continues the chain (seq 1,
+    // not a forked seq 0 the node would drop)...
+    const published: WireOp[] = [];
+    mesh2.onOps((ops) => published.push(...ops));
+    m2.instance.write(utf8("second"));
+    expect(published[0]!.seq).toBe(1);
+
+    // ...with prev-hash + lamport resumed: a witness accepts the pair and lww
+    // resolves to the post-reload value (a fork/gap would leave "first").
+    const witness = new Session(schema, "w");
+    witness.applyRemote([first, published[0]!] as never);
+    expect(fromUtf8(witness.fold("app", d.glade_id.id, "value") as Uint8Array)).toBe("second");
+  });
+
+  it("reload-resume (GAP-9): attachGlade hydrates the session from persisted ops — offline-from-boot does not fork", () => {
+    const d = decl("notes.title", "value");
+    const route = { share: "app", gladeId: d.glade_id.id, shape: "value", key: new Uint8Array() };
+    const engine = new MemoryStoreEngine(); // shared across lives: stands in for the persistent GC-4 engine
+
+    // page life 1: a connected write persists the FULL wire op in the store.
+    const mesh1 = new LocalMesh();
+    const sess1 = new Session(schema, "x") as unknown as SessionLike;
+    const binder1 = new GlialBinder(engine, "x");
+    const m1 = binder1.mount(d, DOC1, undefined, { glade: new SessionDestination(sess1, mesh1, route) });
+    const first = m1.instance.write(utf8("first")) as WireOp;
+
+    // page life 2: same origin + same (persistent) engine, fresh session, and
+    // NO node replay — the tab boots offline.
+    const mesh2 = new LocalMesh();
+    const sess2 = new Session(schema, "x") as unknown as SessionLike;
+    const binder2 = new GlialBinder(engine, "x");
+    let val: InstanceEvent | undefined;
+    const m2 = binder2.mount(d, DOC1, (e) => (val = e), { glade: new SessionDestination(sess2, mesh2, route) });
+
+    // rule-1 persistence: own prior state is visible from the local store alone.
+    expect(fromUtf8(val!.value!)).toBe("first");
+
+    // the destination hydrated the session at attach, so an offline write
+    // CONTINUES the chain instead of forking at seq 0...
+    const published: WireOp[] = [];
+    mesh2.onOps((ops) => published.push(...ops));
+    m2.instance.write(utf8("second"));
+    expect(published[0]!.seq).toBe(1);
+
+    // ...and the pair chains cleanly for any witness (prev hash + lamport).
+    const witness = new Session(schema, "w");
+    witness.applyRemote([first, published[0]!] as never);
+    expect(fromUtf8(witness.fold("app", d.glade_id.id, "value") as Uint8Array)).toBe("second");
+  });
+
+  it("GAP-9 backfill: a late mount catches up from the session — replay absorbed before any mount is not lost", () => {
+    const d = decl("notes.body", "log");
+    const route = { share: "app", gladeId: d.glade_id.id, shape: "log", key: new Uint8Array() };
+
+    // prior lives on one mesh: y and x each append one record.
+    const seed = new LocalMesh();
+    const sessY = new Session(schema, "y") as unknown as SessionLike;
+    const sessX1 = new Session(schema, "x") as unknown as SessionLike;
+    const mY = new GlialBinder(undefined, "y").mount(d, DOC1, undefined, { glade: new SessionDestination(sessY, seed, route) });
+    const mX1 = new GlialBinder(undefined, "x").mount(d, DOC1, undefined, { glade: new SessionDestination(sessX1, seed, route) });
+    const yOp = mY.instance.write(utf8("- y1")) as WireOp;
+    const xOp = mX1.instance.write(utf8("- x1")) as WireOp;
+
+    // x reloads: the carrier feeds the fresh session BEFORE any mount exists
+    // (feedSession is the bus->session absorber the demo hand-rolled)...
+    const mesh = new LocalMesh();
+    const sessX2 = new Session(schema, "x") as unknown as SessionLike;
+    feedSession(sessX2, mesh);
+    mesh.publish([yOp, xOp]); // the node replay: no route is mounted yet
+
+    // ...and the LATE mount backfills its fold from the session store —
+    // own-origin history included (this is catch-up, not a live echo).
+    const events: InstanceEvent[] = [];
+    const mX2 = new GlialBinder(undefined, "x").mount(d, DOC1, (e) => events.push(e), {
+      glade: new SessionDestination(sessX2, mesh, route),
+    });
+    expect(events[0]!.records!.map((r) => fromUtf8(r.payload))).toEqual(["- y1", "- x1"]);
+
+    // the resumed chain still appends cleanly on top of the backfill.
+    const published: WireOp[] = [];
+    mesh.onOps((ops) => published.push(...ops));
+    mX2.instance.write(utf8("- x2"));
+    expect(published[0]!.seq).toBe(1);
+    const last = events[events.length - 1]!;
+    expect(last.records!.map((r) => fromUtf8(r.payload))).toEqual(["- y1", "- x1", "- x2"]);
   });
 
   it("remote log ops arrive as deltas into a live instance", () => {
