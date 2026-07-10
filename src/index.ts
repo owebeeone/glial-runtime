@@ -11,6 +11,7 @@ export { GlialBinder, type Mount, type MountConfig } from "./binder.ts";
 export { BindingInstance, type Fill, type GladeDestination, instanceKey } from "./instance.ts";
 export {
   MemoryStoreEngine,
+  type AppendOutcome,
   type InstanceStore,
   type StoredOp,
   type StoreEngine,

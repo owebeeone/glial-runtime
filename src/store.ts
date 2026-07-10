@@ -12,9 +12,14 @@ export interface StoredOp {
   payload: Uint8Array;
 }
 
+/** Whether an append landed — the SEMANTIC echo/dedup guard (GAP-9): callers
+ *  fold-and-broadcast only on "appended", so a re-delivered op (a wire echo,
+ *  a replayed duplicate) is a no-op while genuine catch-up folds. */
+export type AppendOutcome = "appended" | "duplicate";
+
 /** One instance's local op-log destination. */
 export interface InstanceStore {
-  append(op: StoredOp): void;
+  append(op: StoredOp): AppendOutcome;
   all(): StoredOp[];
 }
 
@@ -28,10 +33,11 @@ export interface StoreEngine {
 
 class MemoryInstanceStore implements InstanceStore {
   private ops: StoredOp[] = [];
-  append(op: StoredOp): void {
+  append(op: StoredOp): AppendOutcome {
     // dedup by (origin, seq) — a re-delivered op is not stored twice.
-    if (this.ops.some((o) => o.origin === op.origin && o.seq === op.seq)) return;
+    if (this.ops.some((o) => o.origin === op.origin && o.seq === op.seq)) return "duplicate";
     this.ops.push(op);
+    return "appended";
   }
   all(): StoredOp[] {
     return this.ops.slice();

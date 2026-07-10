@@ -9,7 +9,7 @@
 // (GAP-9). `drop()` (last unmount) RETAINS the rows: instance teardown is a
 // lifecycle event, not an eviction policy; `purge()` is the explicit delete.
 
-import type { InstanceStore, StoredOp, StoreEngine } from "./store.ts";
+import type { AppendOutcome, InstanceStore, StoredOp, StoreEngine } from "./store.ts";
 
 const STORE = "ops";
 const DB_VERSION = 1;
@@ -35,11 +35,12 @@ class IdbInstanceStore implements InstanceStore {
     private ops: StoredOp[],
   ) {}
 
-  append(op: StoredOp): void {
+  append(op: StoredOp): AppendOutcome {
     // dedup by (origin, seq) — a re-delivered op is not stored twice.
-    if (this.ops.some((o) => o.origin === op.origin && o.seq === op.seq)) return;
+    if (this.ops.some((o) => o.origin === op.origin && o.seq === op.seq)) return "duplicate";
     this.ops.push(op);
     this.engine.put({ instanceKey: this.instanceKey, origin: op.origin, seq: op.seq, op });
+    return "appended";
   }
 
   all(): StoredOp[] {

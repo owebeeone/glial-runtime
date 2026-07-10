@@ -148,12 +148,31 @@ both halves natively; the echo guard survives for assembly only:**
    mount catches up from the session store — own-origin history included
    (catch-up is not a live echo) — so mount order stops mattering.
 
-Residual, noted not fixed: two tabs sharing one profile's stable origin can
-still fork concurrently (origin allocation is the app's identity policy, not
-glial's; pre-existing, recorded with the cutover), and with the MEMORY engine
-an own-origin replay arriving after the mount still does not re-fold (the
-live-path echo guard) — own state then appears only at the next mount; the
-persistent engine (GAP-10) is the real answer there.
+4. The echo guard is SEMANTIC, not origin-based (completion, 2026-07-11):
+   `InstanceStore.append` returns `appended | duplicate` and the instance
+   folds/fans only when something actually landed, so the subscribe path now
+   admits own-origin ops — a genuine wire echo dedups to a no-op, genuine
+   catch-up (an own-origin replay arriving AFTER the mount, memory engine)
+   folds like anyone's ops and own state reappears LIVE, no remount.
+
+Residual, noted not fixed in glial: two tabs sharing one profile's stable
+origin can fork concurrently — origin allocation is the app's identity
+policy, not glial's. RULED for the demo (Gianni, 2026-07-11): per-tab origins
+(sessionStorage-scoped identity; each tab a distinct participant is the
+product intent); per-profile identity + a write-serializing store is
+explicitly NOT the demo's model.
+
+## GAP-11 — offline outbox: locally-minted ops never ship on a later attach (recorded, not fixed)
+
+`write()` without connectivity mints via `mintLocal` (origin = the binder's
+local origin, 1-based seq, `prev: null`, no wire address) and persists
+locally — but nothing re-ships those ops when `attachGlade` later lights
+connectivity, and their chain scheme is not the session's (no prev hash), so
+they cannot simply ride `hydrate`. OUT OF GAP-9's SCOPE by ruling
+(2026-07-11). A fix needs an outbox: mark stored ops unsent, re-mint them
+through the session at attach (fresh seq/prev under the session chain), then
+ship — with the lww/lamport consequences thought through. Until then an
+offline-first write is local-only durable, never replicated.
 
 ## GAP-10 — GC-4 persistent engine: IndexedDB behind the unchanged sync seam; drop ≠ evict
 

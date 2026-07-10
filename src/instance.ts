@@ -92,19 +92,23 @@ export class BindingInstance {
   }
 
   /** A local write through the tap. Mints an op (or defers to the session when
-   *  connected), persists it, folds, and fans the change. */
+   *  connected), persists it, folds, and fans the change. A synchronous wire
+   *  echo may have landed the op via ingest() already — the semantic guard
+   *  (append outcome) keeps it to one fold/fan per write either way. */
   write(payload: Uint8Array): StoredOp {
     const op = this.glade ? this.glade.send(payload) : this.mintLocal(payload);
-    this.store.append(op);
-    this.foldAndBroadcast();
+    if (this.store.append(op) === "appended") this.foldAndBroadcast();
     return op;
   }
 
-  /** Remote ops arriving from the session — persist, fold, fan (assembly inside
-   *  glial: the session is a destination adapter, not where ops become meaning). */
+  /** Ops arriving from the session — persist, fold, fan (assembly inside
+   *  glial: the session is a destination adapter, not where ops become
+   *  meaning). Own-origin ops are welcome: a duplicate (wire echo, re-replay)
+   *  dedups to a no-op; genuine catch-up folds like anyone's ops (GAP-9). */
   ingest(ops: StoredOp[]): void {
-    for (const op of ops) this.store.append(op);
-    this.foldAndBroadcast();
+    let landed = false;
+    for (const op of ops) if (this.store.append(op) === "appended") landed = true;
+    if (landed) this.foldAndBroadcast();
   }
 
   /** Boot/hydrate: fold the persisted ops and mark them delivered. */

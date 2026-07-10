@@ -113,10 +113,10 @@ export class SessionDestination implements GladeDestination {
       // and lamport off the node replay instead of forking at seq 0 (GAP-9).
       // Live echoes of our own publishes dedup in the session store.
       this.session.applyRemote(routed);
-      // The echo guard holds for ASSEMBLY only: own ops fold at write() time,
-      // and reload-restore of own state is the store engine's job (GC-4).
-      const remote = routed.filter((o) => o.origin !== this.session.origin);
-      if (remote.length) onOps(remote);
+      // The instance gets them ALL too: its append outcome is the echo guard
+      // (semantic, not origin-based) — an echo dedups to a no-op, own-origin
+      // catch-up folds, so a reloaded tab's own state reappears live (GAP-9).
+      onOps(routed);
     });
   }
 }

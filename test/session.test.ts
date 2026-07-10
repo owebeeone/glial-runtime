@@ -119,7 +119,24 @@ describe("mount -> session — real @glade/client-ts sessions converge", () => {
     expect(fromUtf8(bVal!.value!)).toBe("from-b");
   });
 
-  it("reload-resume (GAP-9): own-origin replay reaches the session, not the fold; the next write continues the chain", () => {
+  it("a genuine echo dedups to a no-op: exactly one event per write (semantic guard)", () => {
+    const mesh = new LocalMesh();
+    const d = decl("notes.title", "value");
+    const route = { share: "app", gladeId: d.glade_id.id, shape: "value", key: new Uint8Array() };
+    const sess = new Session(schema, "a") as unknown as SessionLike;
+    const events: InstanceEvent[] = [];
+    const m = new GlialBinder(undefined, "a").mount(d, DOC1, (e) => events.push(e), {
+      glade: new SessionDestination(sess, mesh, route),
+    });
+    // LocalMesh echoes our own publish back synchronously; the instance must
+    // not double-fold or double-emit it.
+    m.instance.write(utf8("v1"));
+    m.instance.write(utf8("v2"));
+    expect(events.length).toBe(3); // the mount refresh + one event per write
+    expect(fromUtf8(events[2]!.value!)).toBe("v2");
+  });
+
+  it("reload-resume (GAP-9): own-origin replay after the mount folds in AND resumes the chain", () => {
     const d = decl("notes.title", "value");
     const route = { share: "app", gladeId: d.glade_id.id, shape: "value", key: new Uint8Array() };
 
@@ -136,16 +153,16 @@ describe("mount -> session — real @glade/client-ts sessions converge", () => {
     const binder2 = new GlialBinder(undefined, "x");
     const events: InstanceEvent[] = [];
     const m2 = binder2.mount(d, DOC1, (e) => events.push(e), { glade: new SessionDestination(sess2, mesh2, route) });
-    const eventsBeforeReplay = events.length;
 
     // the node replay delivers the participant's OWN prior op off the bus.
     mesh2.publish([first]);
 
-    // the echo guard still holds for assembly: own-origin replay does not re-fold...
-    expect(events.length).toBe(eventsBeforeReplay);
+    // the semantic guard admits it: this is genuine catch-up (the fresh store
+    // does not hold it), so own state becomes visible WITHOUT a remount...
+    expect(fromUtf8(events[events.length - 1]!.value!)).toBe("first");
 
-    // ...but the session absorbed it: the next write continues the chain (seq 1,
-    // not a forked seq 0 the node would drop)...
+    // ...and the session absorbed it too: the next write continues the chain
+    // (seq 1, not a forked seq 0 the node would drop)...
     const published: WireOp[] = [];
     mesh2.onOps((ops) => published.push(...ops));
     m2.instance.write(utf8("second"));
