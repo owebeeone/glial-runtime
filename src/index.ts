@@ -16,6 +16,13 @@ export {
   type StoreEngine,
 } from "./store.ts";
 export { type InstanceEvent } from "./events.ts";
+export {
+  SessionDestination,
+  type OpBus,
+  type Route,
+  type SessionLike,
+  type WireOp,
+} from "./session.ts";
 export { ValueRegister, type ValueState, type Winner } from "./folds/value.ts";
 export { LogBuffer, type LogRecord, type ReadReq, type ReadResult } from "./folds/log.ts";
 export * from "./bytes.ts";
