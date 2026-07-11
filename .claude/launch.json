@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "gryth-demo",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "/Users/owebeeone/limbo/glade-wz/glade/demo", "dev", "--port", "5175", "--strictPort"],
+      "port": 5175
+    }
+  ]
+}
