@@ -197,3 +197,53 @@ remount must re-open synchronously, and the complete cache is what lets
 `purge(instanceKey)`. Enforcing `decl.retention` (TTL/quota) is deferred: the
 engine is keyed by instanceKey and never sees the decl — wiring retention
 policy across the seam is a later GC-4 slice.
+
+---
+
+Spec-gap calls made building the **supplier kit** (GLP-0006 P0.S4) —
+`src/supplier/index.ts` (`@owebeeone/glial-runtime/supplier`). These resolve
+under-specified points in `plan-docs/plans/GLP-0006-.../SupplierRequirements.md`
++ `dev-docs/glade/GladeSupplierModel.md` §2 (the RULED attachment contract).
+
+## GAP-12 — the supplier session is a STRUCTURAL seam; the two shape mechanisms stay distinct
+
+The kit "attaches over a GladeClient", but binding to the concrete client-ts
+class would couple the kernel-adjacent module to a carrier. **Decision:** a
+structural `SupplierSession` interface (mirrors the kernel's `SessionLike` /
+`OpBus` seams) captures exactly the provider-side surface — `subscribe`,
+`onExchangeReq` / `respondExchange`, `append` / `onOps`, optional `hello`,
+optional `onDrop`. A `GladeClient` is the intended satisfier; tests use a fake
+that models the node. Grip-free (imports glade-decl types + `../bytes.ts` only),
+so the kernel stays dependency-clean and there is no new wire.
+
+The `GladeSupplierModel.md` §2 shape distinction is encoded as TWO methods, not
+one attach act (mid-flight design correction, 2026-07-12):
+- **`serveExchange`** — a Subscribe on a declared exchange id registers the
+  session as THE provider in the node's `providers` map (`attach_provider`); the
+  handler answers each `ExchangeReq` with `corr` preserved, a thrown/rejected
+  handler → `ok:false` data. This IS an attach ceremony.
+- **`serveShare`** — value/log serving is OP-PUBLISHING, not an attach: the
+  ServeClaim / authority lives with the NODE (F1, node-side), any session may
+  append in stage-1, and "serving" is the `set`/`append` ops the source
+  publishes. The subscribe here only RECEIVES the surface's inbound ops so the
+  source can fold them. Framed and doc-commented as such throughout.
+
+## GAP-13 — reattach-on-drop is backoff over an injectable clock; attribution is best-effort
+
+`onDrop` is optional on the seam (some carriers cannot signal a drop). **When
+present**, a drop re-Hellos + re-Subscribes every serving with exponential
+backoff (`initialMs`·`factor^attempt`, capped at `maxMs`; a clean attach resets
+the attempt, consecutive subscribe failures escalate); the `schedule` is
+injectable so tests drive the clock without real timers. **When absent**,
+reattach is inert and the caller re-`serve*`s. `detachAll` cancels a pending
+reattach and unsubscribes the drop signal. Attribution (`hello(principal)`) is
+called ONCE per connection and is best-effort — a hello failure is swallowed
+(stage-1: identity as data, nothing enforced, §4). **Integration points noted
+for the parallel glade work** (client-ts today): inbound `ExchangeReq` (tag 6)
+is decoded but dropped — needs surfacing via `onExchangeReq`; there is no
+`respondExchange`; `onOps` is a single settable field — a multi-surface client
+needs it as a fan-out; `Hello(principal)` is being added in parallel and is
+called defensively (`client.hello?.(principal)`). No glade-node binary was
+spawned in tests: the glade repo is under parallel modification, and the
+in-process client-ts Session already exercises the real fold/store/chain for the
+share path (GAP-4's established fallback).
