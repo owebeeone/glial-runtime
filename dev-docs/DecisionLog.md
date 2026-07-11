@@ -247,3 +247,32 @@ called defensively (`client.hello?.(principal)`). No glade-node binary was
 spawned in tests: the glade repo is under parallel modification, and the
 in-process client-ts Session already exercises the real fold/store/chain for the
 share path (GAP-4's established fallback).
+
+---
+
+Spec-gap calls made building the **typed manifest** (GLP-0006 P0.S5a) —
+`src/manifest.ts` (`@owebeeone/glial-runtime/manifest`).
+
+## GAP-14 — the compile wall is a frozen typed-key map; `Surface` extends `BindingDecl`
+
+The ask: glade ids referenced via typed identifiers, undefined = TS build error.
+**Decision:** `defineManifest<T extends Record<string, SurfaceSpec>>(specs)`
+returns `Manifest<T> = { readonly [K in keyof T]: Surface<T[K]["shape"]> }` — the
+key set is EXACT, so `M.<undefined>` is a compile error by construction (proven
+by `@ts-expect-error` tests the `tsc --noEmit` gate validates). Per-surface
+`Shape` literals survive inference (verified: `M.gwzOps.shape` is `"exchange"`,
+not the widened `Shape`), which keeps shape-safe serving available later.
+
+`Surface<S extends Shape>` **extends `BindingDecl`** (narrowing `shape` to `S`)
+and adds the wire `share` + zone `key`. Consequence: a `Surface` IS a
+`BindingDecl` structurally, so `binder.mount`, the grip adapter's
+`GlialTapConfig.decl`, and the supplier's `SupplierSurface` accept `M.notes` with
+NO kernel change — pure structural compatibility, no cross-module import, kernel
+stays clean. Raw `BindingDecl`s remain accepted for back-compat (doc-noted as the
+lower-level form on those APIs). The handle + its `glade_id` are `Object.freeze`d.
+
+**GQ-6 NOT implemented (seam left):** the id is EXPLICIT on `SurfaceSpec.id`
+today; `GladeDeclSurface.md`'s `derive_glade_id(package_id, grip_key)` +
+pinned-manifest derivation slots in behind that field later with zero consumer
+churn (they reference the handle, never the string). The hash is deliberately
+not built here.

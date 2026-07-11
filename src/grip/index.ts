@@ -88,7 +88,10 @@ export interface GlialTapController<T = unknown> {
 export interface GlialTapConfig<T = unknown> {
   /** The glial instance registry this tap mounts against. */
   readonly binder: GlialBinder;
-  /** The app-static binding declaration (glade id + shape + anchors). */
+  /** The app-static binding declaration (glade id + shape + anchors). Accepts a
+   *  typed `Surface` handle from a manifest (`@owebeeone/glial-runtime/manifest`,
+   *  GLP-0006 P0.S5a — a `Surface` IS a `BindingDecl`), the preferred form; a
+   *  raw `BindingDecl` remains accepted for back-compat. */
   readonly decl: BindingDecl;
   /** The grip this tap provides (the value surface consumers read). */
   readonly grip: Grip<T>;

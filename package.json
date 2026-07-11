@@ -10,7 +10,8 @@
   "exports": {
     ".": "./src/index.ts",
     "./grip": "./src/grip/index.ts",
-    "./supplier": "./src/supplier/index.ts"
+    "./supplier": "./src/supplier/index.ts",
+    "./manifest": "./src/manifest.ts"
   },
   "files": [
     "src"

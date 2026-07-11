@@ -36,7 +36,11 @@ export class GlialBinder {
   /** Mount `(decl, fill)`. Creates the instance on first interest (own store +
    *  fold), or attaches to the live one. Persistence is always on; connectivity
    *  only when `config.glade` is supplied. An optional listener receives a
-   *  refresh immediately and every change after. */
+   *  refresh immediately and every change after.
+   *
+   *  `decl` accepts a typed `Surface` handle from a manifest (GLP-0006 P0.S5a —
+   *  `@owebeeone/glial-runtime/manifest`; a `Surface` IS a `BindingDecl`), the
+   *  preferred form. A raw `BindingDecl` remains accepted for back-compat. */
   mount(decl: BindingDecl, fill: Fill, listener?: (e: InstanceEvent) => void, config: MountConfig = {}): Mount {
     const key = instanceKey(decl.glade_id.id, fill);
     let instance = this.instances.get(key);
