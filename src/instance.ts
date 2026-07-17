@@ -7,7 +7,7 @@
 import type { BindingDecl } from "@owebeeone/glade-decl";
 import type { InstanceStore, StoredOp } from "./store.ts";
 import { ValueRegister } from "./folds/value.ts";
-import { LogBuffer } from "./folds/log.ts";
+import { LogBuffer, type LogRecord } from "./folds/log.ts";
 import { type InstanceEvent, logDelta, logRefresh, valueRefresh } from "./events.ts";
 
 /** The concrete fill that turns an app-static decl into a live instance. The
@@ -22,6 +22,13 @@ export interface Fill {
 
 export function instanceKey(gladeId: string, fill: Fill): string {
   return `${gladeId}\x00${fill.domain}\x00${fill.zone ?? ""}\x00${fill.key ?? ""}`;
+}
+
+/** An op's stable identity — the (origin, seq) pair the store and every fold
+ *  dedup on (client-ts foldLog). The log delta stream is diffed by this identity,
+ *  immune to the whole's re-sorting on late low-lamport arrival (SR56-2-21). */
+function opId(o: StoredOp): string {
+  return `${o.origin}\x00${o.seq}`;
 }
 
 /** The configured connectivity destination (set only when a mount mounts it,
@@ -53,7 +60,11 @@ export class BindingInstance {
   private readonly localOrigin: string;
   private readonly listeners = new Set<Listener>();
 
-  private emittedLen = 0; // log: positions already delivered (delta contiguity)
+  // log: op-identities already delivered as deltas. Identity, NOT a positional
+  // cursor into the whole — the whole is re-sorted (lamport,origin,seq) every
+  // fold, so a late low-lamport op inserts mid-list; an index would dup/drop
+  // (SR56-2-21). Monotonic: the op-set only grows, so this set only grows.
+  private readonly emitted = new Set<string>();
   private glade?: GladeDestination;
   private gladeOff?: () => void;
 
@@ -111,9 +122,11 @@ export class BindingInstance {
     if (landed) this.foldAndBroadcast();
   }
 
-  /** Boot/hydrate: fold the persisted ops and mark them delivered. */
+  /** Boot/hydrate: mark every persisted op delivered so the first post-mount
+   *  fold emits only genuinely new records — the mount itself refreshes the whole
+   *  (subscribe -> refreshEvent). Value shape keeps no delta cursor. */
   hydrate(): void {
-    this.emittedLen = this.isLog ? this.assembleLog().length : 0;
+    if (this.isLog) for (const o of this.store.all()) this.emitted.add(opId(o));
   }
 
   dispose(): void {
@@ -130,11 +143,17 @@ export class BindingInstance {
     return { origin: this.localOrigin, seq, lamport, prev: null, payload };
   }
 
-  private assembleLog() {
-    const buf = new LogBuffer();
-    const ops = this.store.all().sort(
+  /** The op-set in the convergent total order (lamport, origin, seq) — the order
+   *  every replica's fold produces (client-ts foldLog / the cross-language fold
+   *  oracle). Re-sortable by design: a late low-lamport op inserts mid-list. */
+  private sortedOps(): StoredOp[] {
+    return this.store.all().sort(
       (a, b) => a.lamport - b.lamport || (a.origin < b.origin ? -1 : a.origin > b.origin ? 1 : 0) || a.seq - b.seq,
     );
+  }
+
+  private assembleLog(ops: StoredOp[] = this.sortedOps()): LogRecord[] {
+    const buf = new LogBuffer();
     for (const o of ops) buf.push(o.payload);
     return buf.all();
   }
@@ -155,11 +174,23 @@ export class BindingInstance {
 
   private foldAndBroadcast(): void {
     if (this.isLog) {
-      const whole = this.assembleLog();
-      if (whole.length <= this.emittedLen) return;
-      const delta = whole.slice(this.emittedLen);
-      const e = logDelta(this.decl.glade_id, this.emittedLen, delta, whole);
-      this.emittedLen = whole.length;
+      const ops = this.sortedOps();
+      const whole = this.assembleLog(ops);
+      // Delta by IDENTITY, not a positional slice (SR56-2-21): emit each op
+      // exactly once, ever. whole[i] pairs with ops[i], so a delta record keeps
+      // its index in the converged whole as .seq. base_seq = records already
+      // delivered (= whole.length - delta.length); under reorder that is a count,
+      // not an append-position — placement rides on the record's own seq + whole.
+      const baseSeq = this.emitted.size;
+      const delta: LogRecord[] = [];
+      for (let i = 0; i < ops.length; i++) {
+        const id = opId(ops[i]);
+        if (this.emitted.has(id)) continue;
+        this.emitted.add(id);
+        delta.push(whole[i]);
+      }
+      if (delta.length === 0) return;
+      const e = logDelta(this.decl.glade_id, baseSeq, delta, whole);
       for (const l of this.listeners) l(e);
     } else {
       const e = this.refreshEvent();

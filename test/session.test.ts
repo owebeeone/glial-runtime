@@ -12,7 +12,7 @@ import { dirname, join } from "node:path";
 
 import type { BindingDecl } from "@owebeeone/glade-decl";
 import { GlialBinder } from "../src/binder.ts";
-import type { Fill, GladeDestination } from "../src/instance.ts";
+import { instanceKey, type Fill, type GladeDestination } from "../src/instance.ts";
 import { MemoryStoreEngine, type StoredOp } from "../src/store.ts";
 import { feedSession, SessionDestination, type OpBus, type SessionLike, type WireOp } from "../src/session.ts";
 import type { InstanceEvent } from "../src/events.ts";
@@ -70,6 +70,59 @@ describe("mount -> session — fake destination", () => {
     fake.deliver([{ origin: "remote", seq: 1, lamport: 5, prev: null, payload: utf8("- remote line") }]);
     const last = events[events.length - 1];
     expect(last.records!.map((r) => fromUtf8(r.payload))).toEqual(["- local line", "- remote line"]);
+  });
+
+  it("out-of-order arrival (late lower lamport) never dups or drops in the delta stream (SR56-2-21)", () => {
+    const b = new GlialBinder();
+    const d = decl("notes.body", "log");
+    const fake = new FakeDestination();
+    const events: InstanceEvent[] = [];
+    b.mount(d, DOC1, (e) => events.push(e), { glade: fake });
+
+    // B lands first (lamport 5); then A arrives LATE with a LOWER lamport (2), so
+    // the whole re-sorts to [A, B] — A inserts BEFORE the already-emitted B. This
+    // is normal iroh mesh heads/gap-sync reordering across origins.
+    fake.deliver([{ origin: "y", seq: 1, lamport: 5, prev: null, payload: utf8("B") }]);
+    fake.deliver([{ origin: "x", seq: 1, lamport: 2, prev: null, payload: utf8("A") }]);
+
+    // Each op is emitted EXACTLY ONCE across the delta stream. The pre-fix
+    // positional slice emitted [B] then whole.slice(1)=[B] again — B twice, A
+    // never; identity diff emits [B] then [A].
+    const perEvent = events
+      .filter((e) => e.envelope.kind === "delta")
+      .map((e) => e.delta!.map((r) => fromUtf8(r.payload)));
+    expect(perEvent).toEqual([["B"], ["A"]]); // no dup, no drop
+    // ...and the assembled whole is the convergent (lamport,origin,seq) order.
+    const last = events[events.length - 1];
+    expect(last.records!.map((r) => fromUtf8(r.payload))).toEqual(["A", "B"]);
+  });
+
+  it("reload seeds the emitted set: a persisted record is not re-emitted, a late lower op still lands once (SR56-2-21)", () => {
+    const engine = new MemoryStoreEngine();
+    const d = decl("notes.body", "log");
+    // A prior life persisted one op (B at lamport 5).
+    const key = instanceKey(d.glade_id.id, DOC1);
+    engine.open(key).append({ origin: "y", seq: 1, lamport: 5, prev: null, payload: utf8("B") });
+
+    // Reload: a fresh binder over the SAME (persistent) engine.
+    const b = new GlialBinder(engine);
+    const fake = new FakeDestination();
+    const events: InstanceEvent[] = [];
+    b.mount(d, DOC1, (e) => events.push(e), { glade: fake });
+
+    // The mount refreshes the persisted whole and emits ZERO deltas — hydrate
+    // marked B delivered by IDENTITY (across the reload boundary), not just a length.
+    expect(events[0].envelope.kind).toBe("refresh");
+    expect(events[0].records!.map((r) => fromUtf8(r.payload))).toEqual(["B"]);
+    expect(events.some((e) => e.envelope.kind === "delta")).toBe(false);
+
+    // A late op with a LOWER lamport arrives post-reload → it sorts BEFORE B. The
+    // delta must be [A] (a length cursor would re-emit [B] and drop A); the whole
+    // converges to [A, B].
+    fake.deliver([{ origin: "x", seq: 1, lamport: 2, prev: null, payload: utf8("A") }]);
+    const deltas = events.filter((e) => e.envelope.kind === "delta");
+    expect(deltas.map((e) => e.delta!.map((r) => fromUtf8(r.payload)))).toEqual([["A"]]);
+    expect(events[events.length - 1].records!.map((r) => fromUtf8(r.payload))).toEqual(["A", "B"]);
   });
 });
 
