@@ -1,6 +1,6 @@
 // The `value` fold (lww register) — glial's own assembly, gated byte-for-byte
-// against taut-shape's value oracle (`corpus/value.v0.json`, 11 vectors). The
-// winner is max by (lamport, origin); writes dedup by (origin, seq); a forked
+// against taut-shape's value oracle (`corpus/value.v0.json`, 13 vectors). The
+// winner is max by (lamport, origin, seq); writes dedup by (origin, seq); a forked
 // (origin, seq) — same slot, different payload or prev — is equivocation and
 // leaves the register unchanged (the glade lww discipline, TautShapeOracle).
 //
@@ -59,7 +59,12 @@ export class ValueRegister {
   read(): ValueState {
     let win: ValueOp | undefined;
     for (const o of this.ops.values()) {
-      if (!win || o.lamport > win.lamport || (o.lamport === win.lamport && o.origin > win.origin)) {
+      if (
+        !win
+        || o.lamport > win.lamport
+        || (o.lamport === win.lamport && o.origin > win.origin)
+        || (o.lamport === win.lamport && o.origin === win.origin && o.seq > win.seq)
+      ) {
         win = o;
       }
     }

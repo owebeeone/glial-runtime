@@ -28,4 +28,33 @@ export {
 } from "./session.ts";
 export { ValueRegister, type ValueState, type Winner } from "./folds/value.ts";
 export { LogBuffer, type LogRecord, type ReadReq, type ReadResult } from "./folds/log.ts";
+export {
+  glialShapeCapabilities,
+  requireExchangeShape,
+  requireFoldShapeAdapter,
+  requireShapeAdapter,
+  UnsupportedShapeError,
+  type GlialDeliveryShape,
+  type GlialShapeAdapter,
+} from "./shapes.ts";
+export {
+  AtomWriterConflictError,
+  GlialAtomAdapter,
+  ProviderStatusAtomRegistry,
+  type AtomSurfaceDeclaration,
+  type ProviderStatusWriter,
+} from "./provider_status_atom.ts";
+export {
+  GlialStreamAdapter,
+  LiveMetricsReader,
+  LiveMetricsStream,
+  LiveMetricsStreamRegistry,
+  StreamWriterConflictError,
+  type LiveMetricsWriter,
+  type StreamSurfaceDeclaration,
+} from "./live_metrics_stream.ts";
+export {
+  GlialCollaborativeText,
+  type CollaborativeTextState,
+} from "./collaborative_text.ts";
 export * from "./bytes.ts";

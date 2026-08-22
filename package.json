@@ -21,7 +21,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@owebeeone/glade-decl": "file:../glade-decl-ts"
+    "@owebeeone/glade-decl": "file:../glade-decl-ts",
+    "@owebeeone/taut-shape": "file:../taut-shape-ts"
   },
   "peerDependencies": {
     "@owebeeone/grip-core": "^0.2.0"

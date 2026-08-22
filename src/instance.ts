@@ -9,6 +9,7 @@ import type { InstanceStore, StoredOp } from "./store.ts";
 import { ValueRegister } from "./folds/value.ts";
 import { LogBuffer, type LogRecord } from "./folds/log.ts";
 import { type InstanceEvent, logDelta, logRefresh, valueRefresh } from "./events.ts";
+import { type GlialShapeAdapter, requireFoldShapeAdapter } from "./shapes.ts";
 
 /** The concrete fill that turns an app-static decl into a live instance. The
  *  decl's `domain` is an ANCHOR (account|document|deployment); the fill is the
@@ -55,7 +56,7 @@ export class BindingInstance {
   refcount = 0;
 
   private readonly gladeId: string;
-  private readonly isLog: boolean;
+  private readonly adapter: GlialShapeAdapter;
   private readonly store: InstanceStore;
   private readonly localOrigin: string;
   private readonly listeners = new Set<Listener>();
@@ -68,12 +69,18 @@ export class BindingInstance {
   private glade?: GladeDestination;
   private gladeOff?: () => void;
 
-  constructor(decl: BindingDecl, fill: Fill, key: string, store: InstanceStore, localOrigin = "local") {
+  constructor(
+    decl: BindingDecl,
+    fill: Fill,
+    key: string,
+    store: InstanceStore,
+    localOrigin = "local",
+  ) {
     this.decl = decl;
     this.fill = fill;
     this.key = key;
     this.gladeId = decl.glade_id.id;
-    this.isLog = decl.shape === "log";
+    this.adapter = requireFoldShapeAdapter(decl.shape, "instance construction");
     this.store = store;
     this.localOrigin = localOrigin;
   }
@@ -126,7 +133,7 @@ export class BindingInstance {
    *  fold emits only genuinely new records — the mount itself refreshes the whole
    *  (subscribe -> refreshEvent). Value shape keeps no delta cursor. */
   hydrate(): void {
-    if (this.isLog) for (const o of this.store.all()) this.emitted.add(opId(o));
+    if (this.adapter.shape === "log") for (const o of this.store.all()) this.emitted.add(opId(o));
   }
 
   dispose(): void {
@@ -165,7 +172,7 @@ export class BindingInstance {
   }
 
   private refreshEvent(): InstanceEvent {
-    if (this.isLog) return logRefresh(this.decl.glade_id, this.assembleLog());
+    if (this.adapter.shape === "log") return logRefresh(this.decl.glade_id, this.assembleLog());
     const s = this.assembleValue();
     return s.state === "empty"
       ? valueRefresh(this.decl.glade_id, null, null, null)
@@ -173,7 +180,7 @@ export class BindingInstance {
   }
 
   private foldAndBroadcast(): void {
-    if (this.isLog) {
+    if (this.adapter.shape === "log") {
       const ops = this.sortedOps();
       const whole = this.assembleLog(ops);
       // Delta by IDENTITY, not a positional slice (SR56-2-21): emit each op

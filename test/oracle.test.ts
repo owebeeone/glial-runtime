@@ -2,11 +2,11 @@
 // behavioral oracle byte-for-byte (the Lane C consolidation paying off: folds
 // are corpus-conformant, not hand-trusted).
 //
-//  · value: all 11 vectors of corpus/value.v0.json (value.oracle/v0).
-//  · log:   the 6 IMMEDIATE append + catch-up-read vectors of corpus/log.v0.json
-//           (log.oracle/v0). The remaining 19 exercise the held-read/timer/
-//           seal/close/evict/producer-stop delivery engine — out of scope for
-//           binder v0's append fold (dev-docs/DecisionLog.md GAP-1).
+//  · value: all 13 vectors of corpus/value.v0.json (value.oracle/v0).
+//  · log:   all 25 vectors of corpus/log.v0.json are classified by the adjacent
+//           applicability manifest. The 6 IMMEDIATE append + catch-up-read
+//           vectors cross Glial's assembly seam; the remaining 19 exercise the
+//           portable node delivery engine (dev-docs/DecisionLog.md GAP-1).
 
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
@@ -18,8 +18,10 @@ import { LogBuffer } from "../src/folds/log.ts";
 import { b64ToBytes, bytesToB64 } from "../src/bytes.ts";
 
 const here = dirname(fileURLToPath(import.meta.url));
+const repoDir = join(here, "..");
 const corpusDir = join(here, "..", "..", "taut-shape", "corpus");
 const load = (f: string) => JSON.parse(readFileSync(join(corpusDir, f), "utf8"));
+const loadRepo = (f: string) => JSON.parse(readFileSync(join(repoDir, f), "utf8"));
 
 type Msg = Record<string, unknown>;
 interface Step { in: Msg; out: Msg[]; }
@@ -66,7 +68,7 @@ describe("value fold — corpus conformance (value.oracle/v0)", () => {
   const corpus = load("value.v0.json");
   it("declares the pinned oracle version", () => {
     expect(corpus.version).toBe("value.oracle/v0");
-    expect(corpus.vectors.length).toBe(11);
+    expect(corpus.vectors.length).toBe(13);
   });
   for (const v of corpus.vectors as Vector[]) {
     it(`reproduces «${v.name}»`, () => {
@@ -78,16 +80,25 @@ describe("value fold — corpus conformance (value.oracle/v0)", () => {
 
 // ---- log ------------------------------------------------------------------
 
-// The append + immediate catch-up-read subset (timeout_ms=0): push/read only,
-// read_response state in {data, would_block}. See GAP-1.
-const LOG_SUBSET = new Set([
-  "push_then_read_data",
-  "read_empty_probe",
-  "resume_no_dup_no_skip",
-  "batch_bounds",
-  "forward_progress",
-  "two_streams_two_positions",
-]);
+interface LogApplicabilityEntry {
+  vector: string;
+  applies_to_glial_assembly: boolean;
+  owner: string;
+  reason: string;
+}
+
+interface LogApplicability {
+  schema: string;
+  corpus_version: string;
+  classifications: LogApplicabilityEntry[];
+}
+
+const logApplicability = loadRepo("dev-docs/log-corpus-applicability.v0.json") as LogApplicability;
+const LOG_SUBSET = new Set(
+  logApplicability.classifications
+    .filter((entry) => entry.applies_to_glial_assembly)
+    .map((entry) => entry.vector),
+);
 
 function replayLog(steps: Step[]): Msg[][] {
   const buf = new LogBuffer();
@@ -124,6 +135,17 @@ describe("log fold — corpus conformance (append + catch-up subset)", () => {
   const corpus = load("log.v0.json");
   it("declares the pinned oracle version", () => {
     expect(corpus.version).toBe("log.oracle/v0");
+  });
+  it("classifies every corpus vector exactly once at the owning seam", () => {
+    expect(logApplicability.schema).toBe("glial.log-corpus-applicability/v0");
+    expect(logApplicability.corpus_version).toBe(corpus.version);
+    const names = logApplicability.classifications.map((entry) => entry.vector);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names.sort()).toEqual((corpus.vectors as Vector[]).map((v) => v.name).sort());
+    for (const entry of logApplicability.classifications) {
+      expect(entry.owner.length).toBeGreaterThan(0);
+      expect(entry.reason.length).toBeGreaterThan(0);
+    }
   });
   const gated = (corpus.vectors as Vector[]).filter((v) => LOG_SUBSET.has(v.name));
   it("gates every vector in the declared subset", () => {

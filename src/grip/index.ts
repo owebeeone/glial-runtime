@@ -24,6 +24,7 @@ import type { GlialBinder, Mount, MountConfig } from "../binder.ts";
 import type { Fill, GladeDestination } from "../instance.ts";
 import type { InstanceEvent } from "../events.ts";
 import { fromUtf8, utf8 } from "../bytes.ts";
+import { type GlialShapeAdapter, requireFoldShapeAdapter } from "../shapes.ts";
 
 // ---- declarative fill derivation (config-as-data) -------------------------
 
@@ -119,7 +120,7 @@ export class GlialTap<T = unknown> extends BaseTap implements Tap, GlialTapContr
   private readonly handleGrip?: Grip<GlialTapController<T>>;
   private readonly gladeFor?: (fill: Fill) => GladeDestination | undefined;
   private readonly params: Grip<any>[];
-  private readonly isLog: boolean;
+  private readonly adapter: GlialShapeAdapter;
 
   private mounted?: Mount;
   private currentFill?: Fill;
@@ -139,7 +140,7 @@ export class GlialTap<T = unknown> extends BaseTap implements Tap, GlialTapContr
     this.handleGrip = config.handleGrip;
     this.gladeFor = config.gladeFor;
     this.params = params;
-    this.isLog = config.decl.shape === "log";
+    this.adapter = requireFoldShapeAdapter(config.decl.shape, "grip adapter");
     this.gladeId = config.decl.glade_id.id;
   }
 
@@ -189,12 +190,12 @@ export class GlialTap<T = unknown> extends BaseTap implements Tap, GlialTapContr
   }
 
   set(value: unknown): void {
-    if (this.isLog) throw new Error(`GlialTap ${this.gladeId}: set() is a value-shape op; use append() for a log`);
+    if (this.adapter.shape !== "value") throw new Error(`GlialTap ${this.gladeId}: set() is a value-shape op; use append() for a log`);
     this.writePayload(this.codec.encode(value));
   }
 
   append(entry: unknown): void {
-    if (!this.isLog) throw new Error(`GlialTap ${this.gladeId}: append() is a log-shape op; use set() for a value`);
+    if (this.adapter.shape !== "log") throw new Error(`GlialTap ${this.gladeId}: append() is a log-shape op; use set() for a value`);
     this.writePayload(this.codec.encode(entry));
   }
 
@@ -252,7 +253,7 @@ export class GlialTap<T = unknown> extends BaseTap implements Tap, GlialTapContr
    *  empty). log shape: the decoded record list (`records` is the whole list on
    *  both refresh and delta, so the consumer always projects the full log). */
   private assemble(e: InstanceEvent): T | undefined {
-    if (this.isLog) {
+    if (this.adapter.shape === "log") {
       const records = e.records ?? [];
       return records.map((r) => this.codec.decode(r.payload)) as unknown as T;
     }

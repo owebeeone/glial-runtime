@@ -10,6 +10,12 @@ taut-shape-aware assembly inside glial, rich incremental change events
 declared conduits — **no direct tap→glade coupling**. `glade-decl` is the
 shared leaf module both grip-core and glial import.
 
+Taut delivery capabilities are exact and fail-closed. Durable assembly remains
+the `value`/`log` fold path; provider status uses a separate single-writer
+`atom.oracle/v1` service, and disposable provider metrics use a bounded
+`stream.oracle/v1` surface whose consumer explicitly observes loss and
+reconnects as a live-only late join.
+
 Repo is `owebeeone/glial-runtime` (the bare `glial` name is glial-dev's
 historical remote); the gwz member path stays `glial`.
 

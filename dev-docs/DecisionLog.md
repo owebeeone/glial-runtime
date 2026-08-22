@@ -22,7 +22,7 @@ delivery, and the `producer_stop` policy — the **log + window delivery engine*
 which is a server/session concern, not client-side assembly. **Decision:** gate
 the 6; the gate test hard-fails if any out-of-scope input type reaches the log
 replayer, so the scope boundary is enforced, not merely documented. The `value`
-shape is gated in **full** (all 11 vectors of `value.v0.json`).
+shape is gated in **full** (all 13 vectors of `value.v0.json`).
 
 ## GAP-2 — the fill model (`decl.domain` is an anchor, not a value)
 

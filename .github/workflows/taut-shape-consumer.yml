@@ -1,0 +1,45 @@
+name: Taut shape consumer
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  glial-consumer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: workspace/glial
+      - uses: actions/checkout@v4
+        with:
+          repository: owebeeone/taut-shape
+          path: workspace/taut-shape
+      - uses: actions/checkout@v4
+        with:
+          repository: owebeeone/taut-shape-ts
+          path: workspace/taut-shape-ts
+      - uses: actions/checkout@v4
+        with:
+          repository: owebeeone/glade-decl-ts
+          path: workspace/glade-decl-ts
+      - uses: actions/checkout@v4
+        with:
+          repository: owebeeone/grip-core
+          path: workspace/grip-core
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install and test
+        working-directory: workspace/glial
+        run: |
+          npm install --global pnpm@10.24.0
+          pnpm install --frozen-lockfile
+          pnpm typecheck
+          pnpm test

@@ -16,7 +16,7 @@
 //     glade id registers the session as THE provider in the node's `providers`
 //     map (`attach_provider`); the supplier answers each `ExchangeReq` with
 //     `corr` preserved. This IS an attach ceremony.
-//   * VALUE / LOG / WINDOW surfaces → `serveShare`. There is NO provider-map
+//   * VALUE / LOG surfaces → `serveShare`. There is NO provider-map
 //     entry: the claim-holding AUTHORITY is the NODE that holds the surface's
 //     `ServeClaim` (node-side, minted by F1), and "serving" is simply the
 //     supplier session APPENDING ops into the surface's streams (which fold +
@@ -26,6 +26,11 @@
 
 import type { GladeId, Shape } from "@owebeeone/glade-decl";
 import { bytesEq } from "../bytes.ts";
+import {
+  type GlialShapeAdapter,
+  requireExchangeShape,
+  requireFoldShapeAdapter,
+} from "../shapes.ts";
 
 // ---- surface (the BindingDecl-shaped subset a supplier addresses) ----------
 
@@ -255,21 +260,22 @@ class ShareServing implements InternalServing {
   private opsOff?: () => void;
   private detached = false;
   private readonly ctl: ShareController;
-  private readonly isLog: boolean;
+  private readonly adapter: GlialShapeAdapter;
 
   constructor(
     private readonly session: SupplierSession,
     private readonly surface: SupplierSurface,
     private readonly source: ShareSource,
+    adapter?: GlialShapeAdapter,
   ) {
-    this.isLog = surface.shape === "log";
+    this.adapter = adapter ?? requireFoldShapeAdapter(surface.shape, "serveShare");
     this.ctl = {
       set: (payload) => {
-        if (this.isLog) throw new Error(`serveShare ${surface.glade_id.id}: set() is a value-shape op; use append() for a log`);
+        if (this.adapter.shape !== "value") throw new Error(`serveShare ${surface.glade_id.id}: set() is a value-shape op; use append() for a log`);
         return this.publish(payload);
       },
       append: (payload) => {
-        if (!this.isLog) throw new Error(`serveShare ${surface.glade_id.id}: append() is a log-shape op; use set() for a value`);
+        if (this.adapter.shape !== "log") throw new Error(`serveShare ${surface.glade_id.id}: append() is a log-shape op; use set() for a value`);
         return this.publish(payload);
       },
     };
@@ -352,6 +358,7 @@ export class Supplier {
    *  provider (attach_provider); each inbound `ExchangeReq` runs `handler` and
    *  is answered with `corr` preserved (errors → `ok:false` data). */
   serveExchange(surface: SupplierSurface, handler: ExchangeHandler): Serving {
+    requireExchangeShape(surface.shape);
     return this.register(new ExchangeServing(this.session, surface, handler));
   }
 
@@ -360,7 +367,8 @@ export class Supplier {
    *  is op-publishing, NOT a provider attach — the ServeClaim / authority lives
    *  with the NODE (F1); any session may append in stage-1. */
   serveShare(surface: SupplierSurface, source: ShareSource): Serving {
-    return this.register(new ShareServing(this.session, surface, source));
+    const adapter = requireFoldShapeAdapter(surface.shape, "serveShare");
+    return this.register(new ShareServing(this.session, surface, source, adapter));
   }
 
   /** Detach every serving and stop reattaching. */

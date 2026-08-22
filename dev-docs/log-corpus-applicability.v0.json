@@ -1,0 +1,156 @@
+{
+  "schema": "glial.log-corpus-applicability/v0",
+  "corpus_version": "log.oracle/v0",
+  "classifications": [
+    {
+      "vector": "push_then_read_data",
+      "applies_to_glial_assembly": true,
+      "owner": "glial LogBuffer assembly",
+      "reason": "Exercises append sequencing and immediate materialized read."
+    },
+    {
+      "vector": "read_empty_probe",
+      "applies_to_glial_assembly": true,
+      "owner": "glial LogBuffer assembly",
+      "reason": "Exercises the immediate empty projection without holding a reader."
+    },
+    {
+      "vector": "resume_no_dup_no_skip",
+      "applies_to_glial_assembly": true,
+      "owner": "glial LogBuffer assembly",
+      "reason": "Exercises exclusive cursor selection over materialized records."
+    },
+    {
+      "vector": "batch_bounds",
+      "applies_to_glial_assembly": true,
+      "owner": "glial LogBuffer assembly",
+      "reason": "Exercises max-record and max-byte assembly bounds."
+    },
+    {
+      "vector": "forward_progress",
+      "applies_to_glial_assembly": true,
+      "owner": "glial LogBuffer assembly",
+      "reason": "Exercises oversized-first-record progress in an immediate read."
+    },
+    {
+      "vector": "held_read_released_by_push",
+      "applies_to_glial_assembly": false,
+      "owner": "taut-shape log node engine",
+      "reason": "Reader registration, wake-up, and mailbox delivery are node lifecycle behavior."
+    },
+    {
+      "vector": "held_read_timer",
+      "applies_to_glial_assembly": false,
+      "owner": "taut-shape log node engine",
+      "reason": "Timer scheduling and would-block delivery for a held read are node lifecycle behavior."
+    },
+    {
+      "vector": "late_timer_ignored",
+      "applies_to_glial_assembly": false,
+      "owner": "taut-shape log node engine",
+      "reason": "Timer cancellation and stale-timer suppression are node lifecycle behavior."
+    },
+    {
+      "vector": "supersede",
+      "applies_to_glial_assembly": false,
+      "owner": "taut-shape log node engine",
+      "reason": "One-held-read-per-stream supersession is mailbox lifecycle behavior."
+    },
+    {
+      "vector": "seal_then_drain_eof",
+      "applies_to_glial_assembly": false,
+      "owner": "taut-shape log node engine",
+      "reason": "Seal, terminal drain, and EOF responses are node lifecycle behavior."
+    },
+    {
+      "vector": "close_clean",
+      "applies_to_glial_assembly": false,
+      "owner": "taut-shape log node engine",
+      "reason": "Clean terminal closure and reader notification are node lifecycle behavior."
+    },
+    {
+      "vector": "close_failed",
+      "applies_to_glial_assembly": false,
+      "owner": "taut-shape log node engine",
+      "reason": "Failed terminal closure and error delivery are node lifecycle behavior."
+    },
+    {
+      "vector": "terminal_still_readable",
+      "applies_to_glial_assembly": false,
+      "owner": "taut-shape log node engine",
+      "reason": "Post-terminal drain ordering is resolved by the node before assembly."
+    },
+    {
+      "vector": "idempotent_seal_close",
+      "applies_to_glial_assembly": false,
+      "owner": "taut-shape log node engine",
+      "reason": "Idempotence of terminal lifecycle commands is node state-machine behavior."
+    },
+    {
+      "vector": "evict_then_expired",
+      "applies_to_glial_assembly": false,
+      "owner": "taut-shape log node engine",
+      "reason": "Retention-floor mutation and expired-cursor response are node delivery behavior."
+    },
+    {
+      "vector": "beyond_head_expired",
+      "applies_to_glial_assembly": false,
+      "owner": "taut-shape log node engine",
+      "reason": "Invalid future-cursor resolution is a portable node protocol outcome."
+    },
+    {
+      "vector": "two_streams_two_positions",
+      "applies_to_glial_assembly": true,
+      "owner": "glial LogBuffer assembly",
+      "reason": "Exercises independent immediate cursor projections over one assembled log."
+    },
+    {
+      "vector": "one_push_wakes_two",
+      "applies_to_glial_assembly": false,
+      "owner": "taut-shape log node engine",
+      "reason": "Fan-out wake-up of held readers is node mailbox behavior."
+    },
+    {
+      "vector": "end_stream_mid_hold",
+      "applies_to_glial_assembly": false,
+      "owner": "taut-shape log node engine",
+      "reason": "Stream teardown and held-read cancellation are node lifecycle behavior."
+    },
+    {
+      "vector": "last_stream_producer_stop",
+      "applies_to_glial_assembly": false,
+      "owner": "taut-shape log node engine",
+      "reason": "Reader accounting and producer-stop emission are node lifecycle behavior."
+    },
+    {
+      "vector": "never_read_no_stop",
+      "applies_to_glial_assembly": false,
+      "owner": "taut-shape log node engine",
+      "reason": "Whether an unregistered stream affects producer-stop is node lifecycle policy."
+    },
+    {
+      "vector": "stop_when_explicit_only",
+      "applies_to_glial_assembly": false,
+      "owner": "taut-shape log node engine",
+      "reason": "Explicit-only producer-stop policy is node construction and lifecycle behavior."
+    },
+    {
+      "vector": "push_after_seal_warns",
+      "applies_to_glial_assembly": false,
+      "owner": "taut-shape log node engine",
+      "reason": "Post-seal command validation and diagnostics are node state-machine behavior."
+    },
+    {
+      "vector": "push_after_close_warns",
+      "applies_to_glial_assembly": false,
+      "owner": "taut-shape log node engine",
+      "reason": "Post-close command validation and diagnostics are node state-machine behavior."
+    },
+    {
+      "vector": "evict_beyond_head_clamps",
+      "applies_to_glial_assembly": false,
+      "owner": "taut-shape log node engine",
+      "reason": "Retention-floor clamping is node store/lifecycle behavior, not fold assembly."
+    }
+  ]
+}
