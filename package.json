@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@owebeeone/glade-decl": "file:../glade-decl-ts",
-    "@owebeeone/taut-shape": "file:../taut-shape-ts"
+    "@owebeeone/taut-shape": "^0.9.1"
   },
   "peerDependencies": {
     "@owebeeone/grip-core": "^0.2.0"
