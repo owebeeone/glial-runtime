@@ -9,6 +9,7 @@
 import type { ChangeEvent, GladeId } from "@owebeeone/glade-decl";
 import type { LogRecord } from "./folds/log.ts";
 import { fromUtf8, utf8 } from "./bytes.ts";
+import type { SwmrAssembly } from "./swmr.ts";
 
 export interface InstanceEvent {
   /** The glade-decl envelope shell (grip-core types events without glial). */
@@ -21,6 +22,8 @@ export interface InstanceEvent {
   records?: LogRecord[];
   /** log shape: records appended since baseSeq (present on delta). */
   delta?: LogRecord[];
+  /** swmr shape: canonical assembly, including epoch/cursor generation. */
+  swmr?: SwmrAssembly;
 }
 
 // Interim v0 payload encoding for the opaque shell (GAP-5). value → raw value
@@ -73,5 +76,21 @@ export function logDelta(gladeId: GladeId, baseSeq: number, delta: LogRecord[], 
     },
     delta,
     records: whole,
+  };
+}
+
+export function swmrChange(gladeId: GladeId, assembly: SwmrAssembly, kind: "refresh" | "delta"): InstanceEvent {
+  return {
+    envelope: {
+      glade_id: gladeId,
+      shape: "swmr",
+      kind,
+      base_seq: assembly.seq,
+      origin_meta: assembly.writerId !== null && assembly.seq !== null
+        ? { origin: assembly.writerId, seq: assembly.seq }
+        : null,
+      payload: assembly.value?.slice() ?? new Uint8Array(),
+    },
+    swmr: assembly,
   };
 }

@@ -61,6 +61,10 @@ export interface Route {
 export class SessionDestination implements GladeDestination {
   constructor(private readonly session: SessionLike, private readonly bus: OpBus, private readonly route: Route) {}
 
+  get origin(): string {
+    return this.session.origin;
+  }
+
   /** Two-way hydration at attach (GAP-9). Store -> session: replay the
    *  instance's persisted ops so a fresh session with a stable origin resumes
    *  its own chain (seq/prev/lamport) even before — or without — any node

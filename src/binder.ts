@@ -10,7 +10,7 @@ import type { BindingDecl } from "@owebeeone/glade-decl";
 import { MemoryStoreEngine, type StoreEngine } from "./store.ts";
 import { BindingInstance, type Fill, type GladeDestination, instanceKey } from "./instance.ts";
 import type { InstanceEvent } from "./events.ts";
-import { requireFoldShapeAdapter } from "./shapes.ts";
+import { requireMountShapeAdapter } from "./shapes.ts";
 
 export interface MountConfig {
   /** When present, connectivity is lit for this instance (config-as-data — a
@@ -44,7 +44,7 @@ export class GlialBinder {
    *  preferred form. A raw `BindingDecl` remains accepted for back-compat. */
   mount(decl: BindingDecl, fill: Fill, listener?: (e: InstanceEvent) => void, config: MountConfig = {}): Mount {
     // Check before opening a store or creating any instance state.
-    requireFoldShapeAdapter(decl.shape, "mount");
+    requireMountShapeAdapter(decl.shape, "mount");
     const key = instanceKey(decl.glade_id.id, fill);
     let instance = this.instances.get(key);
     if (!instance) {

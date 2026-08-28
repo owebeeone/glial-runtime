@@ -68,11 +68,13 @@ function surface(shape: Shape): SupplierSurface {
 
 describe("Glial shape capability dispatch", () => {
   it("advertises exactly the tested delivery adapters", () => {
-    expect(glialShapeCapabilities().map((cap) => cap.shape)).toEqual(["atom", "crdt", "value", "log", "stream", "text_crdt"]);
+    expect(glialShapeCapabilities().map((cap) => cap.shape)).toEqual(["atom", "crdt", "value", "log", "stream", "swmr", "text_crdt"]);
     expect(requireShapeAdapter("atom").contractVersion).toBe("atom.oracle/v1");
     expect(requireShapeAdapter("value").contractVersion).toBe("value.oracle/v0");
     expect(requireShapeAdapter("log").contractVersion).toBe("log.oracle/v0");
     expect(requireShapeAdapter("stream").contractVersion).toBe("stream.oracle/v1");
+    expect(requireShapeAdapter("swmr").contractVersion).toBe("swmr.oracle/v1");
+    expect(requireShapeAdapter("swmr").operations).toEqual(["snapshot_push", "delta_push", "reset", "read"]);
     expect(requireShapeAdapter("crdt").contractVersion).toBe("crdt.oracle/v1");
     expect(requireShapeAdapter("text_crdt").contractVersion).toBe("text_crdt.profile/v1");
   });
@@ -104,6 +106,12 @@ describe("Glial shape capability dispatch", () => {
       expect.objectContaining({ code: "GLIAL_UNSUPPORTED_SHAPE", shape: "stream", operation: "mount" }),
     );
     expect(store.opens).toBe(0);
+  });
+
+  it("mounts swmr through the dedicated single-writer adapter", () => {
+    const binder = new GlialBinder();
+    const mount = binder.mount(decl("swmr"), { domain: "doc" });
+    expect(mount.instance.decl.shape).toBe("swmr");
   });
 
   it("keeps exchange and delivery serving on separate exact paths", () => {

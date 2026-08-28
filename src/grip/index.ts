@@ -24,7 +24,7 @@ import type { GlialBinder, Mount, MountConfig } from "../binder.ts";
 import type { Fill, GladeDestination } from "../instance.ts";
 import type { InstanceEvent } from "../events.ts";
 import { fromUtf8, utf8 } from "../bytes.ts";
-import { type GlialShapeAdapter, requireFoldShapeAdapter } from "../shapes.ts";
+import { type GlialShapeAdapter, requireMountShapeAdapter } from "../shapes.ts";
 
 // ---- declarative fill derivation (config-as-data) -------------------------
 
@@ -82,6 +82,12 @@ export interface GlialTapController<T = unknown> {
   set(value: unknown): void;
   /** log shape: append one entry. */
   append(entry: unknown): void;
+  /** swmr shape: install a new full snapshot generation image. */
+  snapshot(value: unknown): void;
+  /** swmr shape: append a delta (the v1 file profile sends a full image). */
+  delta(value: unknown): void;
+  /** swmr shape: invalidate the current generation. */
+  reset(detail?: unknown): void;
 }
 
 // ---- adapter config -------------------------------------------------------
@@ -100,6 +106,8 @@ export interface GlialTapConfig<T = unknown> {
   readonly fill: FillSpec;
   /** bytes <-> value/entry codec; defaults to JSON. */
   readonly codec?: PayloadCodec;
+  /** Optional typed projection of the rich event (for example a file window). */
+  readonly projectEvent?: (event: InstanceEvent, codec: PayloadCodec) => T | undefined;
   /** Optional handle grip exposing the write controller (value set / log append). */
   readonly handleGrip?: Grip<GlialTapController<T>>;
   /** Connectivity, config-as-data: fill -> glade destination (undefined = local
@@ -118,6 +126,7 @@ export class GlialTap<T = unknown> extends BaseTap implements Tap, GlialTapContr
   private readonly spec: FillSpec;
   private readonly codec: PayloadCodec;
   private readonly handleGrip?: Grip<GlialTapController<T>>;
+  private readonly projectEvent?: (event: InstanceEvent, codec: PayloadCodec) => T | undefined;
   private readonly gladeFor?: (fill: Fill) => GladeDestination | undefined;
   private readonly params: Grip<any>[];
   private readonly adapter: GlialShapeAdapter;
@@ -138,9 +147,10 @@ export class GlialTap<T = unknown> extends BaseTap implements Tap, GlialTapContr
     this.spec = config.fill;
     this.codec = config.codec ?? JSON_CODEC;
     this.handleGrip = config.handleGrip;
+    this.projectEvent = config.projectEvent;
     this.gladeFor = config.gladeFor;
     this.params = params;
-    this.adapter = requireFoldShapeAdapter(config.decl.shape, "grip adapter");
+    this.adapter = requireMountShapeAdapter(config.decl.shape, "grip adapter");
     this.gladeId = config.decl.glade_id.id;
   }
 
@@ -199,6 +209,26 @@ export class GlialTap<T = unknown> extends BaseTap implements Tap, GlialTapContr
     this.writePayload(this.codec.encode(entry));
   }
 
+  snapshot(value: unknown): void {
+    this.writeSwmr("snapshot", this.codec.encode(value));
+  }
+
+  delta(value: unknown): void {
+    this.writeSwmr("delta", this.codec.encode(value));
+  }
+
+  reset(detail?: unknown): void {
+    this.writeSwmr("reset", detail === undefined ? new Uint8Array() : this.codec.encode(detail));
+  }
+
+  private writeSwmr(action: "snapshot" | "delta" | "reset", payload: Uint8Array): void {
+    if (this.adapter.shape !== "swmr") {
+      throw new Error(`GlialTap ${this.gladeId}: ${action}() is an swmr-shape op`);
+    }
+    if (!this.mounted) throw new Error(`GlialTap ${this.gladeId}: write before mount (no live instance)`);
+    this.mounted.instance.writeSwmr(action, payload);
+  }
+
   private writePayload(payload: Uint8Array): void {
     if (!this.mounted) throw new Error(`GlialTap ${this.gladeId}: write before mount (no live instance)`);
     this.mounted.instance.write(payload);
@@ -253,9 +283,14 @@ export class GlialTap<T = unknown> extends BaseTap implements Tap, GlialTapContr
    *  empty). log shape: the decoded record list (`records` is the whole list on
    *  both refresh and delta, so the consumer always projects the full log). */
   private assemble(e: InstanceEvent): T | undefined {
+    if (this.projectEvent) return this.projectEvent(e, this.codec);
     if (this.adapter.shape === "log") {
       const records = e.records ?? [];
       return records.map((r) => this.codec.decode(r.payload)) as unknown as T;
+    }
+    if (this.adapter.shape === "swmr") {
+      if (e.swmr?.value == null) return this.grip.defaultValue;
+      return this.codec.decode(e.swmr.value) as T;
     }
     if (e.empty) return this.grip.defaultValue;
     return (e.value !== undefined ? this.codec.decode(e.value) : this.grip.defaultValue) as T | undefined;

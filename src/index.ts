@@ -32,11 +32,24 @@ export {
   glialShapeCapabilities,
   requireExchangeShape,
   requireFoldShapeAdapter,
+  requireMountShapeAdapter,
   requireShapeAdapter,
   UnsupportedShapeError,
   type GlialDeliveryShape,
+  type GlialMountShape,
   type GlialShapeAdapter,
 } from "./shapes.ts";
+export {
+  assembleSwmr,
+  decodeSwmrAction,
+  encodeSwmrAction,
+  projectFileWindow,
+  SwmrAdapterError,
+  type FileWindow,
+  type FileWindowRequest,
+  type GlialSwmrAction,
+  type SwmrAssembly,
+} from "./swmr.ts";
 export {
   AtomWriterConflictError,
   GlialAtomAdapter,

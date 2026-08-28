@@ -18,14 +18,15 @@ import { createAtomValueTap } from "@owebeeone/grip-core";
 import { GlialBinder } from "../src/binder.ts";
 import type { Fill } from "../src/instance.ts";
 import { SessionDestination, type OpBus, type SessionLike, type WireOp } from "../src/session.ts";
-import { utf8 } from "../src/bytes.ts";
+import { fromUtf8, utf8 } from "../src/bytes.ts";
+import { projectFileWindow, type FileWindow } from "../src/swmr.ts";
 import {
   glialTap,
   glialTapFactory,
   type GlialTapController,
 } from "../src/grip/index.ts";
 
-function decl(id: string, shape: "value" | "log"): BindingDecl {
+function decl(id: string, shape: "value" | "log" | "swmr"): BindingDecl {
   return {
     glade_id: { id },
     shape,
@@ -106,6 +107,48 @@ describe("GlialTap — value surface through grip", () => {
     ctrl.append("second");
     grok.flush();
     expect(drip.get()).toEqual(["first", "second"]);
+  });
+});
+
+describe("GlialTap — SWMR file window through grip", () => {
+  it("projects one coherent window and exposes snapshot/delta/reset controls", () => {
+    const registry = new GripRegistry();
+    const defineGrip = GripOf(registry);
+    const EMPTY: FileWindow = { from: 0, length: 0, total: 0, bytes: new Uint8Array(), revision: "0:empty" };
+    const WINDOW = defineGrip<FileWindow>("FileWindow", EMPTY);
+    const WINDOW_CTRL = defineGrip<GlialTapController<FileWindow>>("FileWindowCtrl", undefined as any);
+    const grok = new Grok(registry);
+
+    const tap = glialTap({
+      binder: new GlialBinder(undefined, "writer-a"),
+      decl: decl("ws.files", "swmr"),
+      grip: WINDOW,
+      fill: { domain: "doc-1" },
+      handleGrip: WINDOW_CTRL,
+      codec: { encode: (value) => utf8(String(value)), decode: fromUtf8 },
+      projectEvent: (event) => projectFileWindow(event.swmr!, { from: 2, length: 3 }),
+    });
+    const home = grok.mainPresentationContext;
+    grok.registerTapAt(home, tap as unknown as any);
+    const dest = home.createChild();
+    const drip = grok.query(WINDOW, dest);
+    const ctrl = grok.query(WINDOW_CTRL, dest).get() as GlialTapController<FileWindow>;
+    grok.flush();
+
+    ctrl.snapshot("abcdef");
+    grok.flush();
+    expect(fromUtf8(drip.get()!.bytes)).toBe("cde");
+    expect(drip.get()!.revision).toBe("0:0");
+
+    ctrl.delta("uvwxyz");
+    grok.flush();
+    expect(fromUtf8(drip.get()!.bytes)).toBe("wxy");
+    expect(drip.get()!.revision).toBe("0:1");
+
+    ctrl.reset();
+    grok.flush();
+    expect(drip.get()!.bytes).toHaveLength(0);
+    expect(drip.get()!.revision).toBe("1:reset");
   });
 });
 

@@ -5,8 +5,9 @@
  * future names are never reinterpreted as Value.
  */
 
-export type GlialDeliveryShape = "atom" | "crdt" | "value" | "log" | "stream" | "text_crdt";
+export type GlialDeliveryShape = "atom" | "crdt" | "value" | "log" | "stream" | "swmr" | "text_crdt";
 export type GlialFoldShape = "value" | "log";
+export type GlialMountShape = GlialFoldShape | "swmr";
 
 export interface GlialShapeAdapter {
   readonly shape: GlialDeliveryShape;
@@ -40,6 +41,11 @@ const ADAPTERS: Readonly<Record<GlialDeliveryShape, GlialShapeAdapter>> = Object
     contractVersion: "stream.oracle/v1",
     operations: Object.freeze(["push", "read", "reconnect", "end-stream"]),
   }),
+  swmr: Object.freeze({
+    shape: "swmr",
+    contractVersion: "swmr.oracle/v1",
+    operations: Object.freeze(["snapshot_push", "delta_push", "reset", "read"]),
+  }),
   text_crdt: Object.freeze({
     shape: "text_crdt",
     contractVersion: "text_crdt.profile/v1",
@@ -63,10 +69,21 @@ export class UnsupportedShapeError extends Error {
 }
 
 export function requireShapeAdapter(shape: string, operation = "delivery"): GlialShapeAdapter {
-  if (shape === "atom" || shape === "crdt" || shape === "value" || shape === "log" || shape === "stream" || shape === "text_crdt") {
+  if (shape === "atom" || shape === "crdt" || shape === "value" || shape === "log" || shape === "stream" || shape === "swmr" || shape === "text_crdt") {
     return ADAPTERS[shape];
   }
   throw new UnsupportedShapeError(shape, operation, Object.keys(ADAPTERS));
+}
+
+/** Exact durable instance adapters. SWMR has canonical assembly, not a fold. */
+export function requireMountShapeAdapter(
+  shape: string,
+  operation = "mount delivery",
+): GlialShapeAdapter & { readonly shape: GlialMountShape } {
+  if (shape === "value" || shape === "log" || shape === "swmr") {
+    return ADAPTERS[shape] as GlialShapeAdapter & { readonly shape: GlialMountShape };
+  }
+  throw new UnsupportedShapeError(shape, operation, ["log", "swmr", "value"]);
 }
 
 /** Glial's op-fold/store seam remains multi-writer value/log only. */

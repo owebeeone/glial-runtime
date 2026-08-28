@@ -8,8 +8,15 @@ import type { BindingDecl } from "@owebeeone/glade-decl";
 import type { InstanceStore, StoredOp } from "./store.ts";
 import { ValueRegister } from "./folds/value.ts";
 import { LogBuffer, type LogRecord } from "./folds/log.ts";
-import { type InstanceEvent, logDelta, logRefresh, valueRefresh } from "./events.ts";
-import { type GlialShapeAdapter, requireFoldShapeAdapter } from "./shapes.ts";
+import { type InstanceEvent, logDelta, logRefresh, swmrChange, valueRefresh } from "./events.ts";
+import { type GlialShapeAdapter, requireMountShapeAdapter } from "./shapes.ts";
+import {
+  assembleSwmr,
+  encodeSwmrAction,
+  SwmrAdapterError,
+  type GlialSwmrAction,
+  type SwmrAssembly,
+} from "./swmr.ts";
 
 /** The concrete fill that turns an app-static decl into a live instance. The
  *  decl's `domain` is an ANCHOR (account|document|deployment); the fill is the
@@ -36,6 +43,8 @@ function opId(o: StoredOp): string {
  *  B2/GDL-035). The wire and session live below this seam; glial owns what
  *  reaches consumers. Injectable so the instance tests without a live node. */
 export interface GladeDestination {
+  /** Authenticated origin used by send(); required for pre-send SWMR checks. */
+  readonly origin?: string;
   /** Ship a local payload to the mesh; returns the authoritative op meta. */
   send(payload: Uint8Array): StoredOp;
   /** Subscribe to inbound remote ops; returns an unsubscribe. */
@@ -80,7 +89,7 @@ export class BindingInstance {
     this.fill = fill;
     this.key = key;
     this.gladeId = decl.glade_id.id;
-    this.adapter = requireFoldShapeAdapter(decl.shape, "instance construction");
+    this.adapter = requireMountShapeAdapter(decl.shape, "instance construction");
     this.store = store;
     this.localOrigin = localOrigin;
   }
@@ -114,9 +123,28 @@ export class BindingInstance {
    *  echo may have landed the op via ingest() already — the semantic guard
    *  (append outcome) keeps it to one fold/fan per write either way. */
   write(payload: Uint8Array): StoredOp {
+    if (this.adapter.shape === "swmr") {
+      if (this.glade && this.glade.origin === undefined) {
+        throw new SwmrAdapterError(
+          "missing_writer_origin",
+          `connected SWMR destination for ${this.gladeId} does not expose its authenticated origin`,
+        );
+      }
+      const origin = this.glade?.origin ?? this.localOrigin;
+      this.preflightSwmr([this.previewLocal(payload, origin)]);
+    }
     const op = this.glade ? this.glade.send(payload) : this.mintLocal(payload);
+    if (this.adapter.shape === "swmr") this.preflightSwmr([op]);
     if (this.store.append(op) === "appended") this.foldAndBroadcast();
     return op;
+  }
+
+  /** Exact SWMR write surface: action header + opaque application body. */
+  writeSwmr(action: GlialSwmrAction, body: Uint8Array = new Uint8Array()): StoredOp {
+    if (this.adapter.shape !== "swmr") {
+      throw new Error(`Glial instance ${this.gladeId}: writeSwmr() requires shape swmr`);
+    }
+    return this.write(encodeSwmrAction(action, body));
   }
 
   /** Ops arriving from the session — persist, fold, fan (assembly inside
@@ -124,6 +152,7 @@ export class BindingInstance {
    *  meaning). Own-origin ops are welcome: a duplicate (wire echo, re-replay)
    *  dedups to a no-op; genuine catch-up folds like anyone's ops (GAP-9). */
   ingest(ops: StoredOp[]): void {
+    if (this.adapter.shape === "swmr") this.preflightSwmr(ops);
     let landed = false;
     for (const op of ops) if (this.store.append(op) === "appended") landed = true;
     if (landed) this.foldAndBroadcast();
@@ -134,6 +163,7 @@ export class BindingInstance {
    *  (subscribe -> refreshEvent). Value shape keeps no delta cursor. */
   hydrate(): void {
     if (this.adapter.shape === "log") for (const o of this.store.all()) this.emitted.add(opId(o));
+    if (this.adapter.shape === "swmr") this.swmrAssembly();
   }
 
   dispose(): void {
@@ -148,6 +178,25 @@ export class BindingInstance {
     const seq = ops.filter((o) => o.origin === this.localOrigin).length + 1;
     const lamport = ops.reduce((m, o) => Math.max(m, o.lamport), 0) + 1;
     return { origin: this.localOrigin, seq, lamport, prev: null, payload };
+  }
+
+  private previewLocal(payload: Uint8Array, origin: string): StoredOp {
+    const ops = this.store.all();
+    const seq = ops.filter((o) => o.origin === origin).length + 1;
+    const lamport = ops.reduce((m, o) => Math.max(m, o.lamport), 0) + 1;
+    return { origin, seq, lamport, prev: null, payload };
+  }
+
+  private preflightSwmr(incoming: StoredOp[]): void {
+    assembleSwmr([...this.store.all(), ...incoming], this.gladeId);
+  }
+
+  /** Current canonical SWMR assembly. Public for typed projections. */
+  swmrAssembly(): SwmrAssembly {
+    if (this.adapter.shape !== "swmr") {
+      throw new Error(`Glial instance ${this.gladeId}: swmrAssembly() requires shape swmr`);
+    }
+    return assembleSwmr(this.store.all(), this.gladeId);
   }
 
   /** The op-set in the convergent total order (lamport, origin, seq) — the order
@@ -173,6 +222,7 @@ export class BindingInstance {
 
   private refreshEvent(): InstanceEvent {
     if (this.adapter.shape === "log") return logRefresh(this.decl.glade_id, this.assembleLog());
+    if (this.adapter.shape === "swmr") return swmrChange(this.decl.glade_id, this.swmrAssembly(), "refresh");
     const s = this.assembleValue();
     return s.state === "empty"
       ? valueRefresh(this.decl.glade_id, null, null, null)
@@ -198,6 +248,10 @@ export class BindingInstance {
       }
       if (delta.length === 0) return;
       const e = logDelta(this.decl.glade_id, baseSeq, delta, whole);
+      for (const l of this.listeners) l(e);
+    } else if (this.adapter.shape === "swmr") {
+      const assembly = this.swmrAssembly();
+      const e = swmrChange(this.decl.glade_id, assembly, assembly.lastAction === "delta" ? "delta" : "refresh");
       for (const l of this.listeners) l(e);
     } else {
       const e = this.refreshEvent();
