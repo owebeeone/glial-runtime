@@ -10,6 +10,8 @@ import type { ChangeEvent, GladeId } from "@owebeeone/glade-decl";
 import type { LogRecord } from "./folds/log.ts";
 import { fromUtf8, utf8 } from "./bytes.ts";
 import type { SwmrAssembly } from "./swmr.ts";
+import { decodeTextEdit, type TextCrdtState, type TextEdit } from "./text_crdt.ts";
+import type { StoredOp } from "./store.ts";
 
 export interface InstanceEvent {
   /** The glade-decl envelope shell (grip-core types events without glial). */
@@ -24,6 +26,16 @@ export interface InstanceEvent {
   delta?: LogRecord[];
   /** swmr shape: canonical assembly, including epoch/cursor generation. */
   swmr?: SwmrAssembly;
+  /** crdt shape using the text_crdt profile: identity-bearing whole state. */
+  crdt?: TextCrdtState;
+  /** Newly landed identity operations. Consumers MAY apply these incrementally. */
+  crdtDelta?: readonly TextCrdtDelta[];
+}
+
+export interface TextCrdtDelta {
+  readonly origin: string;
+  readonly seq: number;
+  readonly edit: TextEdit;
 }
 
 // Interim v0 payload encoding for the opaque shell (GAP-5). value → raw value
@@ -92,5 +104,28 @@ export function swmrChange(gladeId: GladeId, assembly: SwmrAssembly, kind: "refr
       payload: assembly.value?.slice() ?? new Uint8Array(),
     },
     swmr: assembly,
+  };
+}
+
+export function textCrdtChange(
+  gladeId: GladeId,
+  state: TextCrdtState,
+  kind: "refresh" | "delta",
+  ops: readonly StoredOp[] = [],
+): InstanceEvent {
+  // Import lazily at call time would obscure the strict pre-store decode; a
+  // regular module import is safe because text_crdt imports only store types.
+  const delta = ops.map((op) => ({ origin: op.origin, seq: op.seq, edit: decodeTextEdit(op.payload) }));
+  return {
+    envelope: {
+      glade_id: gladeId,
+      shape: "crdt",
+      kind,
+      base_seq: null,
+      origin_meta: null,
+      payload: utf8(JSON.stringify(delta)),
+    },
+    crdt: state,
+    crdtDelta: delta,
   };
 }

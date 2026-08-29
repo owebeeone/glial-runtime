@@ -70,4 +70,24 @@ export {
   GlialCollaborativeText,
   type CollaborativeTextState,
 } from "./collaborative_text.ts";
+export {
+  anchorSelection,
+  assembleTextCrdt,
+  decodeTextEdit,
+  emptyTextCrdtState,
+  encodeTextEdit,
+  nextTextCounter,
+  planTextReplacement,
+  resolveSelection,
+  textAtomId,
+  TextCrdtError,
+  type TextAffinity,
+  type TextCrdtElement,
+  type TextCrdtState,
+  type TextCursorAnchor,
+  type TextEdit,
+  type TextElementId,
+  type TextSelectionAnchor,
+  type TextSelectionOffsets,
+} from "./text_crdt.ts";
 export * from "./bytes.ts";

@@ -20,13 +20,14 @@ import type { Fill } from "../src/instance.ts";
 import { SessionDestination, type OpBus, type SessionLike, type WireOp } from "../src/session.ts";
 import { fromUtf8, utf8 } from "../src/bytes.ts";
 import { projectFileWindow, type FileWindow } from "../src/swmr.ts";
+import { emptyTextCrdtState, type TextCrdtState } from "../src/text_crdt.ts";
 import {
   glialTap,
   glialTapFactory,
   type GlialTapController,
 } from "../src/grip/index.ts";
 
-function decl(id: string, shape: "value" | "log" | "swmr"): BindingDecl {
+function decl(id: string, shape: "value" | "log" | "swmr" | "crdt"): BindingDecl {
   return {
     glade_id: { id },
     shape,
@@ -149,6 +150,38 @@ describe("GlialTap — SWMR file window through grip", () => {
     grok.flush();
     expect(drip.get()!.bytes).toHaveLength(0);
     expect(drip.get()!.revision).toBe("1:reset");
+  });
+});
+
+describe("GlialTap — text CRDT through grip", () => {
+  it("publishes identity state and replaces text through CRDT operations", () => {
+    const registry = new GripRegistry();
+    const defineGrip = GripOf(registry);
+    const BODY = defineGrip<TextCrdtState>("CollaborativeBody", emptyTextCrdtState());
+    const BODY_CTRL = defineGrip<GlialTapController<TextCrdtState>>("CollaborativeBodyCtrl", undefined as any);
+    const grok = new Grok(registry);
+
+    const tap = glialTap({
+      binder: new GlialBinder(undefined, "editor-a"),
+      decl: decl("doc.body", "crdt"),
+      grip: BODY,
+      fill: { domain: "doc-1" },
+      crdtProfile: "text_crdt",
+      handleGrip: BODY_CTRL,
+    });
+    const home = grok.mainPresentationContext;
+    grok.registerTapAt(home, tap as unknown as any);
+    const dest = home.createChild();
+    const drip = grok.query(BODY, dest);
+    const ctrl = grok.query(BODY_CTRL, dest).get() as GlialTapController<TextCrdtState>;
+    grok.flush();
+
+    ctrl.replaceText("abc");
+    ctrl.replaceText("aXbc");
+    grok.flush();
+    expect(drip.get()?.text).toBe("aXbc");
+    expect(drip.get()?.visible).toHaveLength(4);
+    expect(new Set(drip.get()?.visible.map((element) => `${element.id.actor_id}:${element.id.counter}`)).size).toBe(4);
   });
 });
 

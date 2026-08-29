@@ -4,11 +4,19 @@
 // destination every instance gets for free; the IndexedDB engine (store_idb.ts)
 // slots in behind this same interface (GC-4) with no instance/binder change.
 
+export interface StoredHead {
+  origin: string;
+  seq: number;
+  hash?: Uint8Array | null;
+}
+
 export interface StoredOp {
   origin: string;
   seq: number;
   lamport: number;
   prev: Uint8Array | null;
+  /** Glade causal frontier. Required for CRDT ops; optional on legacy folds. */
+  refs?: StoredHead[];
   payload: Uint8Array;
 }
 

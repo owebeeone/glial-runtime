@@ -114,6 +114,21 @@ describe("Glial shape capability dispatch", () => {
     expect(mount.instance.decl.shape).toBe("swmr");
   });
 
+  it("mounts CRDT only with an explicit text profile", () => {
+    const store = new TrackingStore();
+    const binder = new GlialBinder(store);
+    expect(() => binder.mount(decl("crdt"), { domain: "doc" })).toThrow(/requires crdtProfile/);
+    expect(store.opens).toBe(0);
+
+    const mount = binder.mount(
+      decl("crdt"),
+      { domain: "doc" },
+      undefined,
+      { crdtProfile: "text_crdt" },
+    );
+    expect(mount.instance.textCrdtState().text).toBe("");
+  });
+
   it("keeps exchange and delivery serving on separate exact paths", () => {
     const session = new InertSupplierSession();
     const supplier = attachSupplier(session);

@@ -16,6 +16,9 @@ export interface MountConfig {
   /** When present, connectivity is lit for this instance (config-as-data — a
    *  workspace mount adds a glade destination to the SAME binding). */
   glade?: GladeDestination;
+  /** A CRDT engine is payload-agnostic. Mounts MUST opt into the concrete
+   *  profile whose operations and projection Glial should expose. */
+  crdtProfile?: "text_crdt";
 }
 
 export interface Mount {
@@ -45,10 +48,13 @@ export class GlialBinder {
   mount(decl: BindingDecl, fill: Fill, listener?: (e: InstanceEvent) => void, config: MountConfig = {}): Mount {
     // Check before opening a store or creating any instance state.
     requireMountShapeAdapter(decl.shape, "mount");
+    if (decl.shape === "crdt" && config.crdtProfile !== "text_crdt") {
+      throw new Error(`Glial CRDT mount ${decl.glade_id.id} requires crdtProfile \"text_crdt\"`);
+    }
     const key = instanceKey(decl.glade_id.id, fill);
     let instance = this.instances.get(key);
     if (!instance) {
-      instance = new BindingInstance(decl, fill, key, this.store.open(key), this.origin);
+      instance = new BindingInstance(decl, fill, key, this.store.open(key), this.origin, config.crdtProfile);
       instance.hydrate();
       this.instances.set(key, instance);
     }

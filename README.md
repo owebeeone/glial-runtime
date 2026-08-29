@@ -11,8 +11,12 @@ declared conduits — **no direct tap→glade coupling**. `glade-decl` is the
 shared leaf module both grip-core and glial import.
 
 Taut delivery capabilities are exact and fail-closed. Durable instances use
-the `value`/`log` fold path or the exact `glade.swmr.adapter/v1`, whose
-snapshot/delta/reset operations replay through released `SwmrNode`. Provider
+the `value`/`log` fold path, the exact `glade.swmr.adapter/v1`, or an explicit
+CRDT payload profile. SWMR snapshot/delta/reset operations replay through
+released `SwmrNode`; the first CRDT mount replays Glade causal refs through
+released `CrdtNode` and projects `text_crdt.profile/v1`. Its editor-facing state
+retains element identities and tombstones so selections survive remote deltas.
+Provider
 status uses a separate single-writer `atom.oracle/v1` service, and disposable
 provider metrics use a bounded `stream.oracle/v1` surface whose consumer
 explicitly observes loss and reconnects as a live-only late join.

@@ -7,7 +7,7 @@
 
 export type GlialDeliveryShape = "atom" | "crdt" | "value" | "log" | "stream" | "swmr" | "text_crdt";
 export type GlialFoldShape = "value" | "log";
-export type GlialMountShape = GlialFoldShape | "swmr";
+export type GlialMountShape = GlialFoldShape | "swmr" | "crdt";
 
 export interface GlialShapeAdapter {
   readonly shape: GlialDeliveryShape;
@@ -80,10 +80,10 @@ export function requireMountShapeAdapter(
   shape: string,
   operation = "mount delivery",
 ): GlialShapeAdapter & { readonly shape: GlialMountShape } {
-  if (shape === "value" || shape === "log" || shape === "swmr") {
+  if (shape === "value" || shape === "log" || shape === "swmr" || shape === "crdt") {
     return ADAPTERS[shape] as GlialShapeAdapter & { readonly shape: GlialMountShape };
   }
-  throw new UnsupportedShapeError(shape, operation, ["log", "swmr", "value"]);
+  throw new UnsupportedShapeError(shape, operation, ["crdt", "log", "swmr", "value"]);
 }
 
 /** Glial's op-fold/store seam remains multi-writer value/log only. */

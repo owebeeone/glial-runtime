@@ -88,6 +88,8 @@ export interface GlialTapController<T = unknown> {
   delta(value: unknown): void;
   /** swmr shape: invalidate the current generation. */
   reset(detail?: unknown): void;
+  /** crdt shape + text_crdt profile: emit identity edits for a new projection. */
+  replaceText(value: string): void;
 }
 
 // ---- adapter config -------------------------------------------------------
@@ -106,6 +108,8 @@ export interface GlialTapConfig<T = unknown> {
   readonly fill: FillSpec;
   /** bytes <-> value/entry codec; defaults to JSON. */
   readonly codec?: PayloadCodec;
+  /** Required when `decl.shape === "crdt"`; selects the exact payload profile. */
+  readonly crdtProfile?: "text_crdt";
   /** Optional typed projection of the rich event (for example a file window). */
   readonly projectEvent?: (event: InstanceEvent, codec: PayloadCodec) => T | undefined;
   /** Optional handle grip exposing the write controller (value set / log append). */
@@ -130,6 +134,7 @@ export class GlialTap<T = unknown> extends BaseTap implements Tap, GlialTapContr
   private readonly gladeFor?: (fill: Fill) => GladeDestination | undefined;
   private readonly params: Grip<any>[];
   private readonly adapter: GlialShapeAdapter;
+  private readonly crdtProfile?: "text_crdt";
 
   private mounted?: Mount;
   private currentFill?: Fill;
@@ -151,6 +156,10 @@ export class GlialTap<T = unknown> extends BaseTap implements Tap, GlialTapContr
     this.gladeFor = config.gladeFor;
     this.params = params;
     this.adapter = requireMountShapeAdapter(config.decl.shape, "grip adapter");
+    this.crdtProfile = config.crdtProfile;
+    if (this.adapter.shape === "crdt" && this.crdtProfile !== "text_crdt") {
+      throw new Error(`GlialTap ${config.decl.glade_id.id}: crdtProfile \"text_crdt\" is required`);
+    }
     this.gladeId = config.decl.glade_id.id;
   }
 
@@ -221,6 +230,14 @@ export class GlialTap<T = unknown> extends BaseTap implements Tap, GlialTapContr
     this.writeSwmr("reset", detail === undefined ? new Uint8Array() : this.codec.encode(detail));
   }
 
+  replaceText(value: string): void {
+    if (this.adapter.shape !== "crdt" || this.crdtProfile !== "text_crdt") {
+      throw new Error(`GlialTap ${this.gladeId}: replaceText() is a text_crdt profile operation`);
+    }
+    if (!this.mounted) throw new Error(`GlialTap ${this.gladeId}: write before mount (no live instance)`);
+    this.mounted.instance.replaceText(value);
+  }
+
   private writeSwmr(action: "snapshot" | "delta" | "reset", payload: Uint8Array): void {
     if (this.adapter.shape !== "swmr") {
       throw new Error(`GlialTap ${this.gladeId}: ${action}() is an swmr-shape op`);
@@ -268,7 +285,9 @@ export class GlialTap<T = unknown> extends BaseTap implements Tap, GlialTapContr
     this.mounted?.unmount(); // fill changed: release the old instance interest
     this.currentFill = fill;
     const glade = this.gladeFor?.(fill);
-    const config: MountConfig = glade ? { glade } : {};
+    const config: MountConfig = {};
+    if (glade) config.glade = glade;
+    if (this.crdtProfile) config.crdtProfile = this.crdtProfile;
     // The listener fires a refresh synchronously here (assembly is fanned, not
     // recomputed); onInstanceEvent updates `current` and publishes.
     this.mounted = this.binder.mount(this.decl, fill, (e) => this.onInstanceEvent(e), config);
@@ -292,6 +311,7 @@ export class GlialTap<T = unknown> extends BaseTap implements Tap, GlialTapContr
       if (e.swmr?.value == null) return this.grip.defaultValue;
       return this.codec.decode(e.swmr.value) as T;
     }
+    if (this.adapter.shape === "crdt") return e.crdt as T | undefined;
     if (e.empty) return this.grip.defaultValue;
     return (e.value !== undefined ? this.codec.decode(e.value) : this.grip.defaultValue) as T | undefined;
   }
