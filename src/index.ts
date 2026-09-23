@@ -7,7 +7,7 @@
 // vocabulary is decl / fill / instance / mount only — no matcher terms cross the
 // seam. `glade-decl` is the shared leaf both grip-core and glial import.
 
-export { GlialBinder, type Mount, type MountConfig } from "./binder.ts";
+export { GlialBinder, type Mount, type MountConfig, type ShapeProfileLookup } from "./binder.ts";
 export { BindingInstance, type Fill, type GladeDestination, instanceKey } from "./instance.ts";
 export {
   MemoryStoreEngine,
