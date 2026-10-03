@@ -1,0 +1,6 @@
+{
+  "source": "taut-shape/corpus/scripts_text_crdt/02_concurrent.json",
+  "sha256": "31ef1495abbe476945fd07a1f036308178fcd57056ec8d029fedfcdd55a8ad90",
+  "source_text": "{\"name\":\"concurrent_siblings\",\"ops\":[{\"origin\":\"a\",\"seq\":\"1\",\"deps\":{\"entries\":[]},\"payload\":\"eyJhZnRlciI6bnVsbCwiYXRvbV9pZCI6ImEiLCJraW5kIjoiaW5zZXJ0IiwidGV4dCI6IkEifQ==\"},{\"origin\":\"b\",\"seq\":\"1\",\"deps\":{\"entries\":[{\"origin\":\"a\",\"seq\":\"1\"}]},\"payload\":\"eyJhZnRlciI6ImEiLCJhdG9tX2lkIjoiYiIsImtpbmQiOiJpbnNlcnQiLCJ0ZXh0IjoiQiJ9\"},{\"origin\":\"c\",\"seq\":\"1\",\"deps\":{\"entries\":[{\"origin\":\"a\",\"seq\":\"1\"}]},\"payload\":\"eyJhZnRlciI6ImEiLCJhdG9tX2lkIjoiYyIsImtpbmQiOiJpbnNlcnQiLCJ0ZXh0IjoiQyJ9\"}],\"replicas\":[{\"name\":\"r1\",\"order\":[0,1,2]},{\"name\":\"r2\",\"order\":[2,1,0]},{\"name\":\"r3\",\"order\":[1,0,2]}]}\n",
+  "scope": "Frozen canonical released-text witness; no admission/crypto/durability proof."
+}
