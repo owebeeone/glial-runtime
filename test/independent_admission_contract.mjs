@@ -32,7 +32,7 @@ function project(result) {
   return projectText(node).text;
 }
 const signatures = input.traces.map(t => `${t.scenario}/${t.reverse ?? "partition"}`).sort();
-assert.deepEqual(signatures, ["AB/false", "AB/true", "AD/false", "AD/true", "ABC/partition", "A/false", "A/true", "isolation/partition"].sort(),
+assert.deepEqual(signatures, ["AB/false", "AB/true", "AB-buffer/false", "AB-buffer/true", "AD/false", "AD/true", "ABC/partition", "A/false", "A/true", "isolation/partition"].sort(),
   "ICD-017 exact real-text witnesses cannot be omitted or duplicated");
 const failures = [];
 for (const trace of input.traces) {
@@ -59,7 +59,7 @@ for (const trace of input.traces) {
       assert.equal(trace.denied, true, "ICD-004 denied Y writer cannot borrow X rights");
       assert.notDeepEqual(trace.x_instance, trace.y_instance);
     } else {
-      assert.equal(project(trace.result), trace.scenario, `ICD-006/007/009 expected ${trace.scenario}`);
+      assert.equal(project(trace.result), trace.scenario === "AB-buffer" ? "AB" : trace.scenario, `ICD-006/007/009 expected ${trace.scenario}`);
       if (trace.scenario === "A") {
         assert.equal(trace.result.quarantine["writer-e0"], 1, "ICD-009 two qualified rival admissions convict");
         assert.deepEqual(trace.result.operations.map(op => `${op.origin}:${op.seq}`), ["writer-e0:0"]);
@@ -68,8 +68,18 @@ for (const trace of input.traces) {
         assert.equal(trace.result.security_evidence, 1, "ICD-009 unadmitted rival retained");
         assert.deepEqual(trace.result.quarantine, {}, "ICD-009 unadmitted rival cannot convict");
       }
+      if (trace.scenario === "AB" || trace.scenario === "AB-buffer") {
+        assert.deepEqual(trace.result.operations.map(op => `${op.origin}:${op.seq}`).sort(), ["writer-e0:0", "writer-e1:0"]);
+      }
       if (trace.scenario === "AB") {
-        assert.deepEqual(trace.result.operations.map(op => op.origin).sort(), ["writer-e0", "writer-e1"]);
+        assert.equal(project(trace.before_recovery), "A", "ICD-009 genuine fork precedes recovery");
+        assert.equal(trace.before_recovery.quarantine["writer-e0"], 1);
+        assert.equal(trace.result.quarantine["writer-e0"], 1, "fresh recovery does not erase old fork");
+        assert.equal(trace.qualified_fork, true, "two historically qualifying E0 rivals retained");
+        assert.equal(trace.old_receipts_preserved, true);
+        assert.equal(trace.old_retries_exact, true);
+        assert.equal(trace.reused_origin_rejected, true);
+        assert.equal(trace.fresh_local_receipt, true, "eligible old prefix permits fresh local recovery");
       }
     }
   } catch (error) {
