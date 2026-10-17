@@ -1,6 +1,6 @@
 {
   "name": "@owebeeone/glial",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Glial — the client-side kernel: local persistence first, taut-shape-aware assembly inside glial, refcounted binding instances, rich change events; glade optional and configured-in (GDL-035).",
   "license": "MIT",
   "type": "module",
