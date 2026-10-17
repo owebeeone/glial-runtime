@@ -1,0 +1,14 @@
+[project]
+name = "glial"
+branch = "main"
+remote = "origin"
+tag_prefix = "v"
+github_repo = "owebeeone/glial-runtime"
+
+[npm]
+manifest = "package.json"
+
+[release]
+checks = [["node", "scripts/check-release.mjs"]]
+commit_message = "chore(release): glial {version}"
+github_notes = "Glial {tag}: client-side persistence, binding assembly, optional Glade sessions, and GRIP adapters. Published as @owebeeone/glial with JavaScript and TypeScript declarations for all four entry points."

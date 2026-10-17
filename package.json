@@ -1,7 +1,6 @@
 {
-  "name": "@owebeeone/glial-runtime",
+  "name": "@owebeeone/glial",
   "version": "0.0.0",
-  "private": true,
   "description": "Glial — the client-side kernel: local persistence first, taut-shape-aware assembly inside glial, refcounted binding instances, rich change events; glade optional and configured-in (GDL-035).",
   "license": "MIT",
   "type": "module",
@@ -14,24 +13,56 @@
     "./manifest": "./src/manifest.ts"
   },
   "files": [
-    "src"
+    "src",
+    "dist"
   ],
   "scripts": {
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc --project tsconfig.build.json",
+    "prepack": "pnpm build",
+    "check:release": "node scripts/check-release.mjs"
   },
   "dependencies": {
-    "@owebeeone/glade-decl": "file:../glade-decl-ts",
+    "@owebeeone/glade-decl": "^0.1.1",
     "@owebeeone/taut-shape": "^0.9.1"
   },
   "peerDependencies": {
-    "@owebeeone/grip-core": "^0.2.0"
+    "@owebeeone/grip-core": "^0.3.0"
   },
   "devDependencies": {
-    "@owebeeone/grip-core": "file:../grip-core",
+    "@owebeeone/grip-core": "^0.3.0",
     "@types/node": "^22.20.1",
     "fake-indexeddb": "^6.2.5",
     "typescript": "~5.8.3",
     "vitest": "^2.1.0"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/owebeeone/glial-runtime.git"
+  },
+  "publishConfig": {
+    "access": "public",
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./grip": {
+        "types": "./dist/grip/index.d.ts",
+        "import": "./dist/grip/index.js"
+      },
+      "./supplier": {
+        "types": "./dist/supplier/index.d.ts",
+        "import": "./dist/supplier/index.js"
+      },
+      "./manifest": {
+        "types": "./dist/manifest.d.ts",
+        "import": "./dist/manifest.js"
+      }
+    }
+  },
+  "packageManager": "pnpm@10.24.0"
 }

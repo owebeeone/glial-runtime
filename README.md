@@ -1,4 +1,27 @@
-# glial — the client-side kernel
+# Glial — the client-side kernel
+
+The npm package is `@owebeeone/glial`; its source repository remains
+`owebeeone/glial-runtime`. The separate `owebeeone/glial` repository is the
+historical development workspace and is not part of this release.
+
+The first runtime release is `0.1.0`. Install `@owebeeone/glial@^0.1.0`
+alongside `@owebeeone/grip-core@^0.3.0`. The earlier
+`0.0.0-bootstrap.0` package contains no runtime and is not for application use.
+
+Public entry points are `@owebeeone/glial`, `@owebeeone/glial/grip`,
+`@owebeeone/glial/supplier`, and `@owebeeone/glial/manifest`. Published packages
+contain ESM JavaScript and TypeScript declarations; workspace exports retain
+TypeScript source. Use pnpm to pack so `publishConfig` is applied.
+
+Run `pnpm check:release` with Node 24, pnpm 10.24.0, Git, and network access.
+It validates a temporary copy against published dependencies and pinned test
+fixtures, then tests all four entry points from the packed package. See
+[RELEASE.md](RELEASE.md) for the release procedure.
+
+Known limitation: offline-created operations are locally durable, but do not
+automatically upload when Glade is connected later. See GAP-11 in
+[DecisionLog.md](dev-docs/DecisionLog.md). Applications requiring that behavior
+must account for it; this release does not implement an offline outbox.
 
 Fresh build (GDL-035, ratified 2026-07-07). Design:
 `glade-wz/dev-docs/glial/GlialClientRuntime.md`; seam contract in
