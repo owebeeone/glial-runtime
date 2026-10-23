@@ -13,6 +13,19 @@ Public entry points are `@owebeeone/glial`, `@owebeeone/glial/grip`,
 contain ESM JavaScript and TypeScript declarations; workspace exports retain
 TypeScript source. Use pnpm to pack so `publishConfig` is applied.
 
+Supplier teardown MUST invalidate the detached serving's pending attachments.
+A late subscription acknowledgement MUST NOT reinstall its local hooks or call
+`onServe`; an older attachment MUST NOT replace a newer connection's hooks.
+Retained share controllers MUST throw on publication after their serving is
+detached, without affecting other active servings. This is local lifecycle
+cleanup, not wire-level unsubscribe, cancellation of an application handler
+already executing, or rollback of committed writes. Assistance grants still
+need their own permission checks at the application commit boundary.
+
+The deterministic lifecycle regression command is
+`pnpm exec vitest run test/supplier.lifecycle.test.ts test/supplier.test.ts`.
+See [the reproduction and fix evidence](dev-docs/SupplierLifecycle-20261023.md).
+
 Run `pnpm check:release` with Node 24, pnpm 10.24.0, Git, and network access.
 It validates a temporary copy against published dependencies and pinned test
 fixtures, then tests all four entry points from the packed package. See

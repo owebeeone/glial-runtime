@@ -209,6 +209,7 @@ interface InternalServing extends Serving {
 class ExchangeServing implements InternalServing {
   private reqOff?: () => void;
   private detached = false;
+  private generation = 0;
 
   constructor(
     private readonly session: SupplierSession,
@@ -218,11 +219,21 @@ class ExchangeServing implements InternalServing {
 
   async attach(): Promise<void> {
     if (this.detached) return;
+    const generation = ++this.generation;
     this.reqOff?.();
+    this.reqOff = undefined;
     // Subscribe → the node registers THIS session as the provider for the
     // declared exchange id (attach_provider). Resolves on the Heads ack.
-    await this.session.subscribe(this.surface.share, this.surface.glade_id.id, surfaceKey(this.surface));
-    this.reqOff = this.session.onExchangeReq((req) => this.onReq(req));
+    try {
+      await this.session.subscribe(this.surface.share, this.surface.glade_id.id, surfaceKey(this.surface));
+    } catch (error) {
+      if (!this.detached && generation === this.generation) { throw error; }
+      return;
+    }
+    if (this.detached || generation !== this.generation) { return; }
+    this.reqOff = this.session.onExchangeReq((req) => {
+      if (!this.detached && generation === this.generation) { this.onReq(req); }
+    });
   }
 
   private onReq(req: ExchangeRequest): void {
@@ -246,11 +257,13 @@ class ExchangeServing implements InternalServing {
   }
 
   markDropped(): void {
+    this.generation++;
     this.reqOff = undefined;
   }
 
   detach(): void {
     this.detached = true;
+    this.generation++;
     this.reqOff?.();
     this.reqOff = undefined;
   }
@@ -259,6 +272,7 @@ class ExchangeServing implements InternalServing {
 class ShareServing implements InternalServing {
   private opsOff?: () => void;
   private detached = false;
+  private generation = 0;
   private readonly ctl: ShareController;
   private readonly adapter: GlialShapeAdapter;
 
@@ -284,6 +298,7 @@ class ShareServing implements InternalServing {
   /** The SERVING act: append an op into the surface's stream. The claim-holding
    *  authority is the node (F1); this session just publishes content. */
   private publish(payload: Uint8Array): SupplierOp {
+    if (this.detached) { throw new Error(`serveShare ${this.surface.glade_id.id}: serving is detached`); }
     return this.session.append(
       this.surface.share,
       this.surface.glade_id.id,
@@ -295,12 +310,22 @@ class ShareServing implements InternalServing {
 
   async attach(): Promise<void> {
     if (this.detached) return;
+    const generation = ++this.generation;
     this.opsOff?.();
+    this.opsOff = undefined;
     // NOT an attach ceremony: a value/log subscribe only RECEIVES the surface's
     // inbound ops (any session may append in stage-1) so the source can fold
     // them. The claim/authority lives with the node.
-    await this.session.subscribe(this.surface.share, this.surface.glade_id.id, surfaceKey(this.surface));
-    this.opsOff = this.session.onOps((ops) => this.onOps(ops));
+    try {
+      await this.session.subscribe(this.surface.share, this.surface.glade_id.id, surfaceKey(this.surface));
+    } catch (error) {
+      if (!this.detached && generation === this.generation) { throw error; }
+      return;
+    }
+    if (this.detached || generation !== this.generation) { return; }
+    this.opsOff = this.session.onOps((ops) => {
+      if (!this.detached && generation === this.generation) { this.onOps(ops); }
+    });
     this.source.onServe?.(this.ctl);
   }
 
@@ -314,11 +339,13 @@ class ShareServing implements InternalServing {
   }
 
   markDropped(): void {
+    this.generation++;
     this.opsOff = undefined;
   }
 
   detach(): void {
     this.detached = true;
+    this.generation++;
     this.opsOff?.();
     this.opsOff = undefined;
   }
@@ -398,7 +425,7 @@ export class Supplier {
       await s.attach();
       this.attempt = 0; // a clean attach resets the backoff
     } catch {
-      this.scheduleReattach(); // attach failed — back off and retry the lot
+      if (this.servings.has(s)) { this.scheduleReattach(); } // retry only a still-registered serving
     }
   }
 
