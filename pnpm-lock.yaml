@@ -9,15 +9,15 @@ importers:
   .:
     dependencies:
       '@owebeeone/glade-decl':
-        specifier: file:../glade-decl-ts
-        version: file:../glade-decl-ts
+        specifier: ^0.1.1
+        version: 0.1.1
       '@owebeeone/taut-shape':
         specifier: file:../taut-shape-ts
         version: file:../taut-shape-ts
     devDependencies:
       '@owebeeone/grip-core':
-        specifier: file:../grip-core
-        version: file:../grip-core
+        specifier: ^0.3.0
+        version: 0.3.0
       '@types/node':
         specifier: ^22.20.1
         version: 22.20.1
@@ -174,11 +174,11 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@owebeeone/glade-decl@file:../glade-decl-ts':
-    resolution: {directory: ../glade-decl-ts, type: directory}
+  '@owebeeone/glade-decl@0.1.1':
+    resolution: {integrity: sha512-nKKhpsnG/QQRClf5J5+7QFFk1XbcNThVMIvsgv1dw/5EB1JcIphWKqNg3ZUwhQX9OJDrufyjst0tg6mdkOVYow==}
 
-  '@owebeeone/grip-core@file:../grip-core':
-    resolution: {directory: ../grip-core, type: directory}
+  '@owebeeone/grip-core@0.3.0':
+    resolution: {integrity: sha512-QnMko8gjpt4SmEccQuaIyepe4Xl1X/qsthKiZzlEV8wGchrccgYdUTzHmtaVC84F1u2GSe0asF3SDMYs6epd+A==}
 
   '@owebeeone/taut-shape@file:../taut-shape-ts':
     resolution: {directory: ../taut-shape-ts, type: directory}
@@ -609,9 +609,9 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@owebeeone/glade-decl@file:../glade-decl-ts': {}
+  '@owebeeone/glade-decl@0.1.1': {}
 
-  '@owebeeone/grip-core@file:../grip-core': {}
+  '@owebeeone/grip-core@0.3.0': {}
 
   '@owebeeone/taut-shape@file:../taut-shape-ts': {}
 
