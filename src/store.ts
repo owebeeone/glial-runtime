@@ -29,6 +29,9 @@ export type AppendOutcome = "appended" | "duplicate";
 export interface InstanceStore {
   append(op: StoredOp): AppendOutcome;
   all(): StoredOp[];
+  /** Optional local assembly checkpoint, committed with its operation baseline. */
+  loadCheckpoint?(): unknown;
+  saveCheckpoint?(value: unknown): void;
 }
 
 /** Opens per-instance stores by a stable instance key. `drop` signals instance
@@ -43,7 +46,7 @@ class MemoryInstanceStore implements InstanceStore {
   private ops: StoredOp[] = [];
   append(op: StoredOp): AppendOutcome {
     // dedup by (origin, seq) — a re-delivered op is not stored twice.
-    if (this.ops.some((o) => o.origin === op.origin && o.seq === op.seq)) return "duplicate";
+    if (this.ops.some((o) => o.origin === op.origin && o.seq === op.seq)) { return "duplicate"; }
     this.ops.push(op);
     return "appended";
   }

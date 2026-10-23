@@ -179,3 +179,17 @@ describe("reload-resume through the persistent engine (GAP-9 + GAP-10)", () => {
     engine2.close();
   });
 });
+
+it("reports a blocked schema upgrade instead of leaving the editor connecting forever", async () => {
+  const factory = new IDBFactory();
+  const old = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = factory.open("old-tab", 1);
+    request.onupgradeneeded = () => { request.result.createObjectStore("ops", { keyPath: ["instanceKey", "origin", "seq"] }); };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+  try { await expect(IndexedDbStoreEngine.open("old-tab", factory)).rejects.toThrow(/another tab/i); }
+  finally { old.close(); }
+  const reopened = await IndexedDbStoreEngine.open("old-tab", factory);
+  reopened.close();
+}, 1000);

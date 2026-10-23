@@ -9,6 +9,10 @@
 
 import {
   CrdtNode,
+  checkpointText,
+  restoreText,
+  type CrdtCheckpoint,
+  type TextCheckpoint,
   encodeTextDelete,
   encodeTextInsert,
   projectText,
@@ -124,7 +128,7 @@ export function encodeTextEdit(edit: TextEdit): Uint8Array {
  * RGA insertion rule needed for a new middle insertion to precede the old
  * right-hand sibling while retaining `{actor_id,counter}` as public identity. */
 export function textAtomId(id: TextElementId, insertionOrder = id.counter): string {
-  if (id.actor_id.length === 0) throw new TextCrdtError("text_crdt actor_id must not be empty");
+  if (id.actor_id.length === 0) { throw new TextCrdtError("text_crdt actor_id must not be empty"); }
   if (!Number.isSafeInteger(id.counter) || id.counter <= 0) {
     throw new TextCrdtError("text_crdt element counter must be a positive safe integer");
   }
@@ -178,7 +182,7 @@ function baseSequences(ops: readonly StoredOp[]): Map<string, number> {
   for (const op of ops) {
     const seq = checkedSequence(op.seq, "op seq");
     const prior = result.get(op.origin);
-    if (prior === undefined || seq < prior) result.set(op.origin, seq);
+    if (prior === undefined || seq < prior) { result.set(op.origin, seq); }
   }
   return result;
 }
@@ -193,7 +197,7 @@ function crdtClock(op: StoredOp, bases: ReadonlyMap<string, number>): CrdtClock 
   for (const ref of op.refs ?? []) {
     const seq = crdtSequence(ref.origin, ref.seq, bases);
     const prior = byOrigin.get(ref.origin) ?? 0n;
-    if (seq > prior) byOrigin.set(ref.origin, seq);
+    if (seq > prior) { byOrigin.set(ref.origin, seq); }
   }
   return {
     entries: [...byOrigin]
@@ -210,9 +214,9 @@ interface Atom {
 
 function atomCompare(left: Atom, right: Atom): number {
   const after = (left.after ?? "").localeCompare(right.after ?? "");
-  if (after !== 0) return after;
+  if (after !== 0) { return after; }
   const text = left.text.localeCompare(right.text);
-  if (text !== 0) return text;
+  if (text !== 0) { return text; }
   const origin = left.key[0].localeCompare(right.key[0]);
   return origin !== 0 ? origin : left.key[1] < right.key[1] ? -1 : left.key[1] > right.key[1] ? 1 : 0;
 }
@@ -232,16 +236,19 @@ export function assembleTextCrdt(ops: readonly StoredOp[]): TextCrdtState {
       payload: stored.payload,
     };
     for (const output of node.handle({ type: "apply", op })) {
-      if (output.type === "diagnostic") deliveryDiagnostics.add(diagnosticName(output));
+      if (output.type === "diagnostic") { deliveryDiagnostics.add(diagnosticName(output)); }
     }
   }
 
+  return projectIdentity(node, node.operations, deliveryDiagnostics);
+}
+
+function projectIdentity(node: CrdtNode, operations: readonly CrdtOp[], deliveryDiagnostics: ReadonlySet<string>,
+  atoms = new Map<string, Atom>(), deleted = new Set<string>()): TextCrdtState {
   const canonical = projectText(node);
-  const atoms = new Map<string, Atom>();
-  const deleted = new Set<string>();
   const diagnostics = new Set<string>([...deliveryDiagnostics, ...canonical.diagnostics]);
 
-  for (const op of node.operations) {
+  for (const op of operations) {
     const edit = decodeTextEdit(op.payload);
     if (edit.kind === "delete") {
       deleted.add(edit.atomId);
@@ -251,7 +258,7 @@ export function assembleTextCrdt(ops: readonly StoredOp[]): TextCrdtState {
     const prior = atoms.get(edit.atomId);
     if (prior && (prior.after !== candidate.after || prior.text !== candidate.text || prior.key[0] !== candidate.key[0] || prior.key[1] !== candidate.key[1])) {
       diagnostics.add(`atom_equivocation:${edit.atomId}`);
-      if (atomCompare(candidate, prior) < 0) atoms.set(edit.atomId, candidate);
+      if (atomCompare(candidate, prior) < 0) { atoms.set(edit.atomId, candidate); }
     } else {
       atoms.set(edit.atomId, candidate);
     }
@@ -267,32 +274,30 @@ export function assembleTextCrdt(ops: readonly StoredOp[]): TextCrdtState {
     siblings.push(atomId);
     children.set(atom.after, siblings);
   }
-  for (const siblings of children.values()) siblings.sort();
+  for (const siblings of children.values()) { siblings.sort(); }
 
   const visiting = new Set<string>();
   const visited = new Set<string>();
   const elements: TextCrdtElement[] = [];
-  const visit = (atomId: string): void => {
-    if (visiting.has(atomId)) {
-      diagnostics.add(`cycle:${atomId}`);
-      return;
+  const visit = (root: string): void => {
+    const stack: Array<readonly [string, boolean]> = [[root, false]];
+    while (stack.length) {
+      const [atomId, leaving] = stack.pop()!;
+      if (leaving) { visiting.delete(atomId); visited.add(atomId); continue; }
+      if (visiting.has(atomId)) { diagnostics.add(`cycle:${atomId}`); continue; }
+      if (visited.has(atomId)) { continue; }
+      visiting.add(atomId);
+      const atom = atoms.get(atomId)!;
+      elements.push({ id: parseTextAtomId(atomId, atom.key[0], atom.key[1]), atomId,
+        text: atom.text, deleted: deleted.has(atomId) });
+      stack.push([atomId, true]);
+      const nested = children.get(atomId) ?? [];
+      for (let i = nested.length - 1; i >= 0; i--) { stack.push([nested[i], false]); }
     }
-    if (visited.has(atomId)) return;
-    visiting.add(atomId);
-    const atom = atoms.get(atomId)!;
-    elements.push({
-      id: parseTextAtomId(atomId, atom.key[0], atom.key[1]),
-      atomId,
-      text: atom.text,
-      deleted: deleted.has(atomId),
-    });
-    for (const child of children.get(atomId) ?? []) visit(child);
-    visiting.delete(atomId);
-    visited.add(atomId);
   };
-  for (const root of children.get(null) ?? []) visit(root);
+  for (const root of children.get(null) ?? []) { visit(root); }
   for (const atomId of [...atoms.keys()].filter((id) => !visited.has(id)).sort()) {
-    if (atoms.has(atoms.get(atomId)!.after!)) visit(atomId);
+    if (atoms.has(atoms.get(atomId)!.after!)) { visit(atomId); }
   }
 
   const visible = elements.filter((element) => !element.deleted);
@@ -307,6 +312,136 @@ export function assembleTextCrdt(ops: readonly StoredOp[]): TextCrdtState {
     clock: Object.freeze(Object.fromEntries(node.clock.entries.map((entry) => [entry.origin, entry.seq]))),
     diagnostics: Object.freeze([...diagnostics].sort()),
   });
+}
+
+export interface TextCrdtCheckpoint {
+  readonly version: 1;
+  readonly history: readonly StoredOp[];
+  readonly node: CrdtCheckpoint;
+  readonly text: TextCheckpoint;
+  readonly bases: readonly (readonly [string, number])[];
+  readonly referenced: readonly string[];
+  readonly diagnostics: readonly string[];
+  readonly atoms: readonly (readonly [string, Atom])[];
+  readonly deleted: readonly string[];
+}
+
+/** A mount retains its engine; only a changed sequence normalization requires replay. */
+export class TextCrdtAssembler {
+  private node = new CrdtNode({ maxPending: Number.MAX_SAFE_INTEGER });
+  private history = new Map<string, StoredOp>();
+  private bases = new Map<string, number>();
+  private referenced = new Set<string>();
+  private diagnostics = new Set<string>();
+  private atoms = new Map<string, Atom>();
+  private deleted = new Set<string>();
+  private revision = -1;
+  private value?: TextCrdtState;
+  private counts = { engines: 1, applied: 0, rebases: 0, validated: 0 };
+  get work() { return { ...this.counts, ...this.node.work }; }
+
+  checkpoint(): TextCrdtCheckpoint {
+    this.state();
+    return structuredClone({ version: 1, history: [...this.history.values()], node: this.node.checkpoint(),
+      text: checkpointText(this.node), bases: [...this.bases], referenced: [...this.referenced],
+      diagnostics: [...this.diagnostics], atoms: [...this.atoms], deleted: [...this.deleted] });
+  }
+
+  static restore(saved: TextCrdtCheckpoint, persisted: readonly StoredOp[]): TextCrdtAssembler {
+    if (saved.version !== 1) { throw new Error("unsupported Glial text checkpoint"); }
+    const held = new Map(persisted.map(op => [JSON.stringify([op.origin, op.seq]), op]));
+    for (const old of saved.history) {
+      const op = held.get(JSON.stringify([old.origin, old.seq]));
+      if (!op || op.payload.length !== old.payload.length || op.payload.some((b, i) => b !== old.payload[i])
+        || JSON.stringify(op.refs ?? []) !== JSON.stringify(old.refs ?? [])) {
+        throw new Error("checkpoint does not match persisted operation history");
+      }
+    }
+    const result = new TextCrdtAssembler();
+    result.node = CrdtNode.restore(saved.node);
+    restoreText(result.node, saved.text);
+    result.history = new Map(saved.history.map(op => [JSON.stringify([op.origin, op.seq]), op]));
+    result.bases = new Map(saved.bases);
+    result.referenced = new Set(saved.referenced);
+    result.diagnostics = new Set(saved.diagnostics);
+    result.atoms = new Map(saved.atoms);
+    result.deleted = new Set(saved.deleted);
+    result.revision = result.node.revision;
+    result.apply(persisted.filter(op => !result.history.has(JSON.stringify([op.origin, op.seq]))));
+    return result;
+  }
+
+  static validate(ops: readonly StoredOp[]): void {
+    for (const op of ops) {
+      decodeTextEdit(op.payload);
+      checkedSequence(op.seq, "op seq");
+      for (const ref of op.refs ?? []) { checkedSequence(ref.seq, "ref seq"); }
+    }
+  }
+
+  validateNew(ops: readonly StoredOp[]): void {
+    for (const op of ops) {
+      const old = this.history.get(JSON.stringify([op.origin, op.seq]));
+      if (old && old.payload.length === op.payload.length && old.payload.every((b, i) => b === op.payload[i])
+        && JSON.stringify(old.refs ?? []) === JSON.stringify(op.refs ?? [])) { continue; }
+      this.counts.validated++;
+      TextCrdtAssembler.validate([op]);
+    }
+  }
+
+  apply(ops: readonly StoredOp[]): void {
+    this.validateNew(ops);
+    const fresh: StoredOp[] = [];
+    const seen = new Set<string>();
+    const bases = new Map(this.bases);
+    let rebase = false;
+    for (const op of ops) {
+      const key = JSON.stringify([op.origin, op.seq]);
+      if (this.history.has(key) || seen.has(key)) { continue; }
+      seen.add(key);
+      fresh.push(op);
+      const base = bases.get(op.origin);
+      if (base === undefined || op.seq < base) { bases.set(op.origin, op.seq); }
+    }
+    if (!fresh.length) { return; }
+    for (const [origin, base] of bases) {
+      const old = this.bases.get(origin);
+      if ((old !== undefined && old !== base) || (old === undefined && this.referenced.has(origin) && base !== 0)) { rebase = true; }
+    }
+    for (const op of fresh) {
+      this.history.set(JSON.stringify([op.origin, op.seq]), op);
+      for (const ref of op.refs ?? []) { this.referenced.add(ref.origin); }
+    }
+    this.bases = bases;
+    if (rebase) {
+      this.node = new CrdtNode({ maxPending: Number.MAX_SAFE_INTEGER });
+      this.diagnostics.clear();
+      this.atoms.clear();
+      this.deleted.clear();
+      this.revision = -1;
+      this.counts.engines++;
+      this.counts.rebases++;
+    }
+    for (const stored of rebase ? this.history.values() : fresh) {
+      this.counts.applied++;
+      for (const output of this.node.handle({ type: "apply", op: {
+        origin: stored.origin, seq: crdtSequence(stored.origin, stored.seq, bases),
+        deps: crdtClock(stored, bases), payload: stored.payload,
+      } })) {
+        if (output.type === "diagnostic") { this.diagnostics.add(diagnosticName(output)); }
+      }
+    }
+    this.value = undefined;
+  }
+
+  state(): TextCrdtState {
+    if (this.value) { return this.value; }
+    const delta = this.node.changesSince(this.revision);
+    if (delta.reset) { this.atoms.clear(); this.deleted.clear(); }
+    this.value = projectIdentity(this.node, delta.operations, this.diagnostics, this.atoms, this.deleted);
+    this.revision = this.node.revision;
+    return this.value;
+  }
 }
 
 interface ElementRange {
@@ -332,17 +467,17 @@ export function planTextReplacement(
   nextText: string,
   allocate: () => string,
 ): readonly TextEdit[] {
-  if (nextText === state.text) return [];
+  if (nextText === state.text) { return []; }
   const previous = Array.from(state.text);
   const next = Array.from(nextText);
   let prefix = 0;
-  while (prefix < previous.length && prefix < next.length && previous[prefix] === next[prefix]) prefix += 1;
+  while (prefix < previous.length && prefix < next.length && previous[prefix] === next[prefix]) { prefix += 1; }
   let suffix = 0;
   while (
     suffix < previous.length - prefix
     && suffix < next.length - prefix
     && previous[previous.length - 1 - suffix] === next[next.length - 1 - suffix]
-  ) suffix += 1;
+  ) { suffix += 1; }
 
   const oldEnd = previous.length - suffix;
   const ranges = codePointRanges(state);
@@ -369,11 +504,11 @@ export function planTextReplacement(
 
 function cursorAtOffset(state: TextCrdtState, rawOffset: number): TextCursorAnchor {
   const offset = Math.max(0, Math.min(state.text.length, rawOffset));
-  if (state.visible.length === 0) return { element: null, affinity: "before" };
+  if (state.visible.length === 0) { return { element: null, affinity: "before" }; }
   let position = 0;
   for (const element of state.visible) {
     const end = position + element.text.length;
-    if (offset === position && position === 0) return { element: element.id, affinity: "before" };
+    if (offset === position && position === 0) { return { element: element.id, affinity: "before" }; }
     if (offset <= end) {
       return { element: element.id, affinity: offset - position < end - offset ? "before" : "after" };
     }
@@ -390,13 +525,13 @@ export function anchorSelection(state: TextCrdtState, selection: TextSelectionOf
 }
 
 function resolveCursor(state: TextCrdtState, cursor: TextCursorAnchor): number {
-  if (cursor.element === null) return cursor.affinity === "before" ? 0 : state.text.length;
+  if (cursor.element === null) { return cursor.affinity === "before" ? 0 : state.text.length; }
   const target = elementKey(cursor.element);
   let offset = 0;
   for (const element of state.elements) {
     const before = offset;
-    if (!element.deleted) offset += element.text.length;
-    if (elementKey(element.id) === target) return cursor.affinity === "before" ? before : offset;
+    if (!element.deleted) { offset += element.text.length; }
+    if (elementKey(element.id) === target) { return cursor.affinity === "before" ? before : offset; }
   }
   return cursor.affinity === "before" ? 0 : state.text.length;
 }

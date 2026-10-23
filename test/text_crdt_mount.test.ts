@@ -30,6 +30,22 @@ function mountText(origin: string) {
 }
 
 describe("mounted text CRDT", () => {
+  it("publishes one completed projection for a bulk replacement and none for a no-op", () => {
+    const mount = mountText("bulk");
+    const values: string[] = [];
+    const off = mount.instance.subscribe((event) => { if (event.crdt) { values.push(event.crdt.text); } });
+    values.length = 0;
+    const text = "A shared proposal\n".repeat(8);
+    mount.instance.replaceText(text);
+    expect(values).toEqual([text]);
+    expect(mount.instance.operations()).toHaveLength(Array.from(text).length);
+    values.length = 0;
+    mount.instance.replaceText(text);
+    expect(values).toEqual([]);
+    mount.instance.replaceText("");
+    expect(values).toEqual([""]);
+    off(); mount.unmount();
+  });
   it("edits the middle of a document without replacing the whole value", () => {
     const mount = mountText("alice");
     mount.instance.replaceText("hello");
@@ -98,3 +114,72 @@ describe("mounted text CRDT", () => {
 // rather than only a whole string that would force cursor-by-offset behavior.
 const _stateContract: TextCrdtState | undefined = undefined;
 void _stateContract;
+
+describe("bulk text destination behavior", () => {
+  it("deduplicates synchronous echoes and publishes only the completed replacement", () => {
+    const mount = mountText("local");
+    let receive: (ops: import("../src/store.ts").StoredOp[]) => void = () => {};
+    let seq = 0;
+    mount.instance.attachGlade({
+      origin: "echo",
+      subscribe: (fn) => { receive = fn; return () => {}; },
+      send: (payload) => {
+        seq += 1;
+        const op = { origin: "echo", seq, lamport: seq, prev: null,
+          refs: seq > 1 ? [{ origin: "echo", seq: seq - 1 }] : [], payload };
+        receive([op]);
+        return op;
+      },
+    });
+    const values: string[] = [];
+    const off = mount.instance.subscribe((event) => { if (event.crdt) { values.push(event.crdt.text); } });
+    values.length = 0;
+    mount.instance.replaceText("A😀B");
+    expect(values).toEqual(["A😀B"]);
+    expect(mount.instance.operations()).toHaveLength(3);
+    mount.instance.replaceText("A😀B");
+    expect(values).toHaveLength(1);
+    off(); mount.unmount();
+  });
+
+  it("retains a successfully sent prefix after a destination failure and can resume", () => {
+    const mount = mountText("local");
+    let seq = 0, fail = true;
+    mount.instance.attachGlade({
+      origin: "partial",
+      subscribe: () => () => {},
+      send: (payload) => {
+        if (seq === 2 && fail) { fail = false; throw new Error("send interrupted"); }
+        seq += 1;
+        return { origin: "partial", seq, lamport: seq, prev: null,
+          refs: seq > 1 ? [{ origin: "partial", seq: seq - 1 }] : [], payload };
+      },
+    });
+    expect(() => mount.instance.replaceText("ABC")).toThrow("send interrupted");
+    expect(mount.instance.textCrdtState().text).toBe("AB");
+    mount.instance.replaceText("ABC");
+    expect(mount.instance.textCrdtState().text).toBe("ABC");
+    mount.unmount();
+  });
+});
+
+it("retains the engine and does no historical replay for a small edit or echo", () => {
+  const mount = mountText("incremental");
+  mount.instance.replaceText("x".repeat(500));
+  const before = mount.instance.textCrdtWork();
+  mount.instance.replaceText("x".repeat(500) + "y");
+  const after = mount.instance.textCrdtWork();
+  expect(after.engines).toBe(before.engines);
+  expect(after.applied - before.applied).toBe(1);
+  const value = mount.instance.textCrdtState();
+  mount.instance.ingest(mount.instance.operations());
+  expect(mount.instance.textCrdtState()).toBe(value);
+  expect(mount.instance.textCrdtWork()).toEqual(after);
+});
+
+it("projects a large paste without exhausting the call stack", () => {
+  const mounted = mountText("large");
+  mounted.instance.replaceText("x".repeat(12000));
+  expect(mounted.instance.textCrdtState().text.length).toBe(12000);
+  mounted.unmount();
+});

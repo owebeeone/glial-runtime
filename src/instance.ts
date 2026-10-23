@@ -18,13 +18,14 @@ import {
   type SwmrAssembly,
 } from "./swmr.ts";
 import {
-  assembleTextCrdt,
+  TextCrdtAssembler,
   decodeTextEdit,
   encodeTextEdit,
   nextTextCounter,
   planTextReplacement,
   textAtomId,
   type TextCrdtState,
+  type TextCrdtCheckpoint,
 } from "./text_crdt.ts";
 
 /** The concrete fill that turns an app-static decl into a live instance. The
@@ -86,6 +87,9 @@ export class BindingInstance {
   private readonly emitted = new Set<string>();
   private glade?: GladeDestination;
   private gladeOff?: () => void;
+  private textBatch?: StoredOp[];
+  private textAssembly?: TextCrdtAssembler;
+  private checkpointAt = 0;
 
   constructor(
     decl: BindingDecl,
@@ -112,11 +116,11 @@ export class BindingInstance {
   /** Attach connectivity: local writes also ship, remote ops flow into assembly
    *  (mount lights connectivity — s-stack-connect). Idempotent-safe: one dest. */
   attachGlade(dest: GladeDestination): void {
-    if (this.glade) return;
+    if (this.glade) { return; }
     this.glade = dest;
     const backfill = dest.hydrate?.(this.store.all()); // persisted chain reaches the session first
     this.gladeOff = dest.subscribe((ops) => this.ingest(ops));
-    if (backfill?.length) this.ingest(backfill); // late mount catches up on absorbed replay
+    if (backfill?.length) { this.ingest(backfill); } // late mount catches up on absorbed replay
   }
 
   /** A consumer attaches: bump the refcount and hand it a refresh of the live
@@ -133,7 +137,7 @@ export class BindingInstance {
    *  echo may have landed the op via ingest() already — the semantic guard
    *  (append outcome) keeps it to one fold/fan per write either way. */
   write(payload: Uint8Array): StoredOp {
-    if (this.adapter.shape === "crdt") decodeTextEdit(payload);
+    if (this.adapter.shape === "crdt") { decodeTextEdit(payload); }
     if (this.adapter.shape === "swmr") {
       if (this.glade && this.glade.origin === undefined) {
         throw new SwmrAdapterError(
@@ -145,9 +149,9 @@ export class BindingInstance {
       this.preflightSwmr([this.previewLocal(payload, origin)]);
     }
     const op = this.glade ? this.glade.send(payload) : this.mintLocal(payload);
-    if (this.adapter.shape === "swmr") this.preflightSwmr([op]);
-    if (this.adapter.shape === "crdt") assembleTextCrdt([...this.store.all(), op]);
-    if (this.store.append(op) === "appended") this.foldAndBroadcast([op]);
+    if (this.adapter.shape === "swmr") { this.preflightSwmr([op]); }
+    if (this.adapter.shape === "crdt") { this.textCrdtState(); this.textAssembly!.validateNew([op]); }
+    if (this.store.append(op) === "appended") { this.foldAndBroadcast([op]); }
     return op;
   }
 
@@ -164,36 +168,42 @@ export class BindingInstance {
    *  meaning). Own-origin ops are welcome: a duplicate (wire echo, re-replay)
    *  dedups to a no-op; genuine catch-up folds like anyone's ops (GAP-9). */
   ingest(ops: StoredOp[]): void {
-    if (this.adapter.shape === "swmr") this.preflightSwmr(ops);
-    if (this.adapter.shape === "crdt") assembleTextCrdt([...this.store.all(), ...ops]);
+    if (this.textBatch) {
+      // A synchronous destination can echo local operations during replacement.
+      // Validate and fold the completed batch once, including those echoes.
+      this.textBatch.push(...ops);
+      return;
+    }
+    if (this.adapter.shape === "swmr") { this.preflightSwmr(ops); }
+    if (this.adapter.shape === "crdt") { this.textCrdtState(); this.textAssembly!.validateNew(ops); }
     let landed = false;
     const delta: StoredOp[] = [];
     for (const op of ops) {
-      if (this.store.append(op) !== "appended") continue;
+      if (this.store.append(op) !== "appended") { continue; }
       landed = true;
       delta.push(op);
     }
-    if (landed) this.foldAndBroadcast(delta);
+    if (landed) { this.foldAndBroadcast(delta); }
   }
 
   /** Boot/hydrate: mark every persisted op delivered so the first post-mount
    *  fold emits only genuinely new records — the mount itself refreshes the whole
    *  (subscribe -> refreshEvent). Value shape keeps no delta cursor. */
   hydrate(): void {
-    if (this.adapter.shape === "log") for (const o of this.store.all()) this.emitted.add(opId(o));
-    if (this.adapter.shape === "swmr") this.swmrAssembly();
-    if (this.adapter.shape === "crdt") this.textCrdtState();
+    if (this.adapter.shape === "log") { for (const o of this.store.all()) { this.emitted.add(opId(o)); } }
+    if (this.adapter.shape === "swmr") { this.swmrAssembly(); }
+    if (this.adapter.shape === "crdt") { this.textCrdtState(); }
   }
 
   dispose(): void {
+    this.saveTextCheckpoint(true);
     this.gladeOff?.();
     this.listeners.clear();
   }
 
   // ---- assembly -----------------------------------------------------------
 
-  private mintLocal(payload: Uint8Array): StoredOp {
-    const ops = this.store.all();
+  private mintLocal(payload: Uint8Array, ops: StoredOp[] = this.store.all()): StoredOp {
     const seq = ops.filter((o) => o.origin === this.localOrigin).length + 1;
     const lamport = ops.reduce((m, o) => Math.max(m, o.lamport), 0) + 1;
     const refs = this.adapter.shape === "crdt" ? this.crdtHeads(ops) : undefined;
@@ -212,7 +222,7 @@ export class BindingInstance {
     const latest = new Map<string, StoredOp>();
     for (const op of ops) {
       const prior = latest.get(op.origin);
-      if (!prior || op.seq > prior.seq) latest.set(op.origin, op);
+      if (!prior || op.seq > prior.seq) { latest.set(op.origin, op); }
     }
     return [...latest.values()]
       .sort((left, right) => left.origin.localeCompare(right.origin))
@@ -236,7 +246,33 @@ export class BindingInstance {
     if (this.adapter.shape !== "crdt" || this.crdtProfile !== "text_crdt") {
       throw new Error(`Glial instance ${this.gladeId}: textCrdtState() requires a text_crdt profile`);
     }
-    return assembleTextCrdt(this.store.all());
+    if (!this.textAssembly) {
+      const persisted = this.store.all();
+      const saved = this.store.loadCheckpoint?.();
+      if (saved) {
+        try { this.textAssembly = TextCrdtAssembler.restore(saved as TextCrdtCheckpoint, persisted); }
+        catch { /* An incompatible/partial checkpoint falls back to the retained log. */ }
+      }
+      if (!this.textAssembly) {
+        this.textAssembly = new TextCrdtAssembler();
+        this.textAssembly.apply(persisted);
+      }
+    }
+    return this.textAssembly.state();
+  }
+
+  private saveTextCheckpoint(force = false): void {
+    if (!this.textAssembly || !this.store.saveCheckpoint) { return; }
+    const applied = this.textAssembly.work.applied;
+    if (force || applied - this.checkpointAt >= 256) {
+      this.store.saveCheckpoint(this.textAssembly.checkpoint());
+      this.checkpointAt = applied;
+    }
+  }
+
+  textCrdtWork() {
+    this.textCrdtState();
+    return this.textAssembly!.work;
   }
 
   /** Replace the editor projection by emitting identity insert/delete ops. */
@@ -253,7 +289,29 @@ export class BindingInstance {
       nextText,
       () => textAtomId({ actor_id: actorId, counter: counter++ }, insertionOrder++),
     );
-    for (const edit of edits) this.write(encodeTextEdit(edit));
+    if (!edits.length) { return; }
+    const before = this.store.all();
+    const batch: StoredOp[] = [];
+    let sequence = before.reduce((max, op) => op.origin === this.localOrigin ? Math.max(max, op.seq) : max, 0) + 1;
+    let lamport = before.reduce((max, op) => Math.max(max, op.lamport), 0);
+    const heads = new Map(this.crdtHeads(before)!.map(head => [head.origin, head]));
+    this.textBatch = batch;
+    try {
+      for (const edit of edits) {
+        const payload = encodeTextEdit(edit);
+        const op = this.glade ? this.glade.send(payload) : {
+          origin: this.localOrigin, seq: sequence++, lamport: ++lamport, prev: null,
+          refs: [...heads.values()].sort((a, b) => a.origin.localeCompare(b.origin)), payload,
+        };
+        batch.push(op);
+        heads.set(op.origin, { origin: op.origin, seq: op.seq, hash: null });
+      }
+    } finally {
+      this.textBatch = undefined;
+      // Keep the ordinary ingest validator and persistence path. If sending
+      // stops partway through, retain the completed prefix, as individual writes do.
+      if (batch.length) { this.ingest(batch); }
+    }
   }
 
   /** Snapshot of durable instance ops, useful for recovery/convergence gates. */
@@ -272,20 +330,20 @@ export class BindingInstance {
 
   private assembleLog(ops: StoredOp[] = this.sortedOps()): LogRecord[] {
     const buf = new LogBuffer();
-    for (const o of ops) buf.push(o.payload);
+    for (const o of ops) { buf.push(o.payload); }
     return buf.all();
   }
 
   private assembleValue() {
     const reg = new ValueRegister();
-    for (const o of this.store.all()) reg.set(o);
+    for (const o of this.store.all()) { reg.set(o); }
     return reg.read();
   }
 
   private refreshEvent(): InstanceEvent {
-    if (this.adapter.shape === "log") return logRefresh(this.decl.glade_id, this.assembleLog());
-    if (this.adapter.shape === "swmr") return swmrChange(this.decl.glade_id, this.swmrAssembly(), "refresh");
-    if (this.adapter.shape === "crdt") return textCrdtChange(this.decl.glade_id, this.textCrdtState(), "refresh");
+    if (this.adapter.shape === "log") { return logRefresh(this.decl.glade_id, this.assembleLog()); }
+    if (this.adapter.shape === "swmr") { return swmrChange(this.decl.glade_id, this.swmrAssembly(), "refresh"); }
+    if (this.adapter.shape === "crdt") { return textCrdtChange(this.decl.glade_id, this.textCrdtState(), "refresh"); }
     const s = this.assembleValue();
     return s.state === "empty"
       ? valueRefresh(this.decl.glade_id, null, null, null)
@@ -305,23 +363,26 @@ export class BindingInstance {
       const delta: LogRecord[] = [];
       for (let i = 0; i < ops.length; i++) {
         const id = opId(ops[i]);
-        if (this.emitted.has(id)) continue;
+        if (this.emitted.has(id)) { continue; }
         this.emitted.add(id);
         delta.push(whole[i]);
       }
-      if (delta.length === 0) return;
+      if (delta.length === 0) { return; }
       const e = logDelta(this.decl.glade_id, baseSeq, delta, whole);
-      for (const l of this.listeners) l(e);
+      for (const l of this.listeners) { l(e); }
     } else if (this.adapter.shape === "swmr") {
       const assembly = this.swmrAssembly();
       const e = swmrChange(this.decl.glade_id, assembly, assembly.lastAction === "delta" ? "delta" : "refresh");
-      for (const l of this.listeners) l(e);
+      for (const l of this.listeners) { l(e); }
     } else if (this.adapter.shape === "crdt") {
+      this.textAssembly?.apply(landed);
+      this.textCrdtState();
+      this.saveTextCheckpoint();
       const e = textCrdtChange(this.decl.glade_id, this.textCrdtState(), "delta", landed);
-      for (const l of this.listeners) l(e);
+      for (const l of this.listeners) { l(e); }
     } else {
       const e = this.refreshEvent();
-      for (const l of this.listeners) l(e);
+      for (const l of this.listeners) { l(e); }
     }
   }
 }
