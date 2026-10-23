@@ -10,7 +10,11 @@
     ".": "./src/index.ts",
     "./grip": "./src/grip/index.ts",
     "./supplier": "./src/supplier/index.ts",
-    "./manifest": "./src/manifest.ts"
+    "./manifest": "./src/manifest.ts",
+    "./assistance": "./src/assistance/index.ts",
+    "./assistance/glade": "./src/assistance/glade.ts",
+    "./assistance/mcp": "./src/assistance/mcp.ts",
+    "./assistance/grip": "./src/assistance/grip.ts"
   },
   "files": [
     "src",
@@ -61,6 +65,22 @@
       "./manifest": {
         "types": "./dist/manifest.d.ts",
         "import": "./dist/manifest.js"
+      },
+      "./assistance": {
+        "types": "./dist/assistance/index.d.ts",
+        "import": "./dist/assistance/index.js"
+      },
+      "./assistance/glade": {
+        "types": "./dist/assistance/glade.d.ts",
+        "import": "./dist/assistance/glade.js"
+      },
+      "./assistance/mcp": {
+        "types": "./dist/assistance/mcp.d.ts",
+        "import": "./dist/assistance/mcp.js"
+      },
+      "./assistance/grip": {
+        "types": "./dist/assistance/grip.d.ts",
+        "import": "./dist/assistance/grip.js"
       }
     }
   },
