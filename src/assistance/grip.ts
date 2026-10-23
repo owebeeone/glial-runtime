@@ -28,6 +28,9 @@ export interface GripAssistanceOptions {
   id(): string;
   excludeContext?(context: string): boolean;
   exclude?(location: ValueLocation): boolean;
+  /** Keep a value readable but omit write authority. Checked again at commit;
+   * owner restrictions also apply to destination views of that owner. */
+  readonly?(location: ValueLocation): boolean;
   /** Associate an atom with its normal application controller/persistence once.
    * Unassociated discovered controllers remain enabled by default. */
   controller?(location: ValueLocation, controller: ValueController): ValueController;
@@ -52,7 +55,8 @@ export class GripAssistance {
       if (type) {
         let ref: string | undefined;
         const leaf = source.controller?.getLeafController?.(location.path);
-        const writable = !!source.controller && (!source.controller.getLeafController || !!leaf);
+        const readonly = this.options.readonly?.(location) || location.role === "destination" && this.options.readonly?.({ ...location, context: location.ownerContext!, role: "owner" });
+        const writable = !readonly && !!source.controller && (!source.controller.getLeafController || !!leaf);
         if (source.controller && writable) {
           const key = JSON.stringify([location.role, location.context, location.gripKey, location.path]);
           let target = this.targets.get(key);

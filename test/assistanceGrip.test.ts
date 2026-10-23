@@ -11,6 +11,15 @@ function fixture() {
   const graph = { getGraph: () => nodes };
   return { graph, nodes, node, grip, controller, tap, get: () => state, id: () => `ref-${++seq}` };
 }
+it("read-only policy retains readable values, defaults other leaves on and revokes old references before commit", () => {
+  const f = fixture(); let readonly = false;
+  const a = new GripAssistance(f.graph, { id: f.id, readonly: x => readonly && x.path[0] === "drafts" });
+  const before = a.read("pair"), draft = before.find(v => v.path.join("/") === "drafts/note")!;
+  const commit = a.prepareWrite({ ref: draft.ref, value: "bad" }, "pair"); readonly = true;
+  expect(a.read("pair").find(v => v.path.join("/") === "drafts/note")).toMatchObject({ value: "editable", writable: false });
+  expect(a.read("pair").find(v => v.path.join("/") === "left")?.writable).toBe(true);
+  expect(() => commit()).toThrow(/reference/); expect(f.get().drafts.note).toBe("editable");
+});
 it("discovers all scalar leaves by default, preserves siblings and rejects raw object replacements", () => {
   const f = fixture(), a = new GripAssistance(f.graph, { id: f.id });
   const values = a.read("pair-1");
