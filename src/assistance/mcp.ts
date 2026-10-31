@@ -44,12 +44,50 @@ export class AssistanceMcp {
       const offer = await c.offer(); if (offer.token) { this.pairings.set(offer.token, c); } return serializable(offer);
     }
     const c = this.pairings.get(args.token); if (!c) { return serializable(result("refused")); }
+    if (name === "endPairing") { return serializable(await c.end(c.grant?.token ?? args.token)); }
     if (c.grant && name !== "abandonUnknown") {
-      const candidates = [...this.ads.values()].filter(a => Number(a.expires) > this.now() && a.identity.application === c.identity.application && a.identity.workspace === c.identity.workspace && a.identity.supplier === c.identity.supplier && a.identity.generation !== c.identity.generation);
-      if (candidates.length > 1) { if (name === "endPairing") return serializable(await c.end()); return serializable(result("refused", null, { reason: "ambiguous reload ownership; explicit pairing required" })); }
-      if (candidates.length === 1) {
-        const next = candidates[0], resumed = await c.resume(next.identity, r => callAssistance(this.client, next.share, r));
-        if (resumed.status !== "accepted") { if (name === "endPairing") return serializable(await c.end()); return serializable(resumed); }
+      const candidatesOf = () => [...this.ads.values()].filter(a => Number(a.expires) > this.now() && a.identity.application === c.identity.application && a.identity.workspace === c.identity.workspace && a.identity.supplier === c.identity.supplier && a.identity.generation !== c.identity.generation);
+      const fingerprint = (ads: AssistanceAdvertisement[]) => JSON.stringify(ads.map(ad => [key(ad), ad.share, Array.from(ad.capabilities)]).sort((a, b) => String(a[0]).localeCompare(String(b[0]))));
+      const candidates = candidatesOf(), initial = fingerprint(candidates);
+      const signed: { ad: AssistanceAdvertisement; sequence: number }[] = [], legacy: AssistanceAdvertisement[] = [];
+      for (const ad of candidates) {
+        let capabilities: any;
+        try { capabilities = JSON.parse(new TextDecoder().decode(ad.capabilities)); } catch { continue; }
+        if (!Object.hasOwn(capabilities ?? {}, "resumeLineage")) {
+          // A directory record can outlive its provider, including after a new
+          // explicit pairing. Only a definitive absence makes it safe to ignore.
+          const probe = await c.probeResume(ad.identity, r => callAssistance(this.client, ad.share, r));
+          if (probe.status === "unknown") { return serializable(probe); }
+          if (probe.status !== "unavailable") { legacy.push(ad); }
+          continue;
+        }
+        if (await c.verifiesLineage(ad.identity, capabilities.resumeLineage)) { signed.push({ ad, sequence: capabilities.resumeLineage.sequence }); }
+      }
+      if (initial !== fingerprint(candidatesOf())) { return serializable(result("conflict", null, { reason: "assistance advertisements changed; read again" })); }
+      const highest = signed.length ? Math.max(...signed.map(item => item.sequence)) : undefined;
+      const proven = signed.filter(item => item.sequence === highest);
+      if (proven.length > 1 || (!proven.length && legacy.length > 1)) {
+        return serializable(result("refused", null, { reason: "ambiguous reload ownership; explicit pairing required" }));
+      }
+      let next = proven[0]?.ad ?? (legacy.length === 1 ? legacy[0] : undefined);
+      if (signed.length > 1 && next) {
+        const probes = await Promise.all(signed.map(async item => ({ ...item, result: await c.probeResume(item.ad.identity, r => callAssistance(this.client, item.ad.share, r)) })));
+        if (probes.some(item => item.result.status === "unknown")) { return serializable(result("unknown", null, { reason: "resume candidate liveness is uncertain" })); }
+        const available = probes.filter(item => item.result.status === "available");
+        if (available.length > 1) { return serializable(result("refused", null, { reason: "ambiguous reload ownership; explicit pairing required" })); }
+        next = available[0]?.ad;
+        if (!next) { return serializable(result("refused", null, { reason: "no authenticated replacement available" })); }
+      }
+      if (next) {
+        const current = await c.read();
+        if (current.status === "observed") { return serializable(result("refused", null, { reason: "competing live supplier; explicit pairing required" })); }
+        if (current.status === "unknown" && !/^no authority provider attached for /.test(current.reason ?? "")) { return serializable(current); }
+      }
+      if (next && initial !== fingerprint(candidatesOf())) { return serializable(result("conflict", null, { reason: "assistance advertisements changed; read again" })); }
+      if (next && Number(next.expires) <= this.now()) { return serializable(result("expired", null, { reason: "replacement advertisement expired" })); }
+      if (next) {
+        const resumed = await c.resume(next.identity, r => callAssistance(this.client, next.share, r));
+        if (resumed.status !== "accepted") { return serializable(resumed); }
         if (resumed.token) this.pairings.set(resumed.token, c);
         for (const [k, a] of this.ads) if (a.identity.supplier === next.identity.supplier && a.identity.workspace === next.identity.workspace && a.identity.application === next.identity.application && k !== key(next)) this.ads.delete(k);
       }
@@ -59,7 +97,6 @@ export class AssistanceMcp {
     if (name === "invokeAction") { return serializable(await c.invoke(args.action, args.arguments, args.expected)); }
     if (name === "writeValue") { return serializable(await c.invoke("writeValue", { ref: args.ref, value: args.value }, args.expected)); }
     if (name === "executeJavaScript") { return serializable(await c.invoke("executeJavaScript", { context: args.context, gripKey: args.gripKey, source: args.source }, args.expected)); }
-    if (name === "endPairing") { return serializable(await c.end(c.grant?.token ?? args.token)); }
     if (name === "abandonUnknown") { c.abandon(); return { status: "manually-abandoned", cancelled: false }; }
     throw Error("Unknown tool");
   }

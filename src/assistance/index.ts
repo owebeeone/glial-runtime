@@ -15,11 +15,19 @@ export interface Provider {
 export interface Runtime { now(): number; id(): string; changed?(): void; }
 /** Local-only retained authority. Never put this in discovery or application state. */
 export interface ResumeAuthority { application: string; workspace: string; supplier: string; consumer: string; expires: number; scope: string; secret: string }
+export interface ResumeLineage { sequence: number; proof: string }
 export interface AssistanceOptions { grantDurationMs?: number; resumeScope?: string; resume?: ResumeAuthority; saveResume?(authority: ResumeAuthority | undefined): void }
 async function proof(secret: string, direction: string, identity: AssistanceIdentity, consumer: string, nonce: string) {
   const key = await crypto.subtle.importKey("raw", json(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const bytes = await crypto.subtle.sign("HMAC", key, json([direction, identity.application, identity.workspace, identity.supplier, identity.generation, consumer, nonce]));
   return Array.from(new Uint8Array(bytes), n => n.toString(16).padStart(2, "0")).join("");
+}
+/** Sign an opt-in same-tab generation counter without exposing resume authority.
+ * Hosts must retain the counter across reloads and hold exclusive ownership
+ * of the supplier identity before publishing a signed lineage. */
+export async function signResumeLineage(authority: ResumeAuthority, identity: AssistanceIdentity, sequence: number): Promise<ResumeLineage> {
+  if (!Number.isSafeInteger(sequence) || sequence < 1 || authority.application !== identity.application || authority.workspace !== identity.workspace || authority.supplier !== identity.supplier) { throw Error("Invalid resume lineage"); }
+  return { sequence, proof: await proof(authority.secret, "lineage", identity, authority.consumer, JSON.stringify([sequence, authority.expires, authority.scope])) };
 }
 type Offer = { token: string; consumer: string; deadline: number; epoch: bigint; status: string; reason: string | null };
 export function result(status: string, payload: unknown = null, extra: Partial<AssistanceResult> = {}): AssistanceResult {
@@ -79,6 +87,17 @@ export class AssistanceSupplier {
     this.expire();
     if (r.version !== 1n || !sameIdentity(r.identity, this.identity) || !r.consumer) { return result("refused", null, { reason: "identity or version mismatch" }); }
     if (this.runtime.now() >= Number(r.deadline)) { return result("expired"); }
+    if (r.operation === "probeResume") {
+      const authority = this.resumeAuthority;
+      if (!this.enabled || !this.ready || this.active || !authority || authority.consumer !== r.consumer || authority.expires <= this.runtime.now()) { return result("refused"); }
+      try {
+        const input = JSON.parse(new TextDecoder().decode(r.payload));
+        if (typeof input?.nonce !== "string" || input.nonce.length > 128 || input.proof !== await proof(authority.secret, "probe-request", this.identity, r.consumer, input.nonce)) { return result("refused"); }
+        const signature = await proof(authority.secret, "probe-response", this.identity, r.consumer, input.nonce);
+        if (!this.enabled || !this.ready || this.active || this.resumeAuthority !== authority || authority.expires <= this.runtime.now() || this.runtime.now() >= Number(r.deadline)) { return result("refused"); }
+        return result("available", { proof: signature });
+      } catch { return result("refused"); }
+    }
     if (r.operation === "resume") {
       const authority = this.resumeAuthority;
       if (!this.enabled || !this.ready || this.active || this.resuming || !authority || authority.consumer !== r.consumer || authority.expires <= this.runtime.now()) return result("refused");
@@ -138,10 +157,31 @@ export class AssistanceConsumer {
   private unresolved = false;
   private disconnected = false;
   private resuming = false;
+  private resumeUnresolved = false;
   constructor(public identity: AssistanceIdentity, readonly consumer: string, private call: (r: AssistanceRequest) => Promise<AssistanceResult>, private now: () => number) {}
   private attemptedResumes = new Set<string>();
+  async verifiesLineage(identity: AssistanceIdentity, lineage: unknown): Promise<boolean> {
+    const r = this.grant && (value(this.grant) as { resume?: ResumeAuthority }).resume;
+    const claim = lineage as Partial<ResumeLineage> | null;
+    if (!r || this.disconnected || r.expires <= this.now() || r.consumer !== this.consumer || r.application !== identity.application || r.workspace !== identity.workspace || r.supplier !== identity.supplier || !claim || !Number.isSafeInteger(claim.sequence) || claim.sequence! < 1 || typeof claim.proof !== "string") { return false; }
+    return claim.proof === (await signResumeLineage(r, identity, claim.sequence!)).proof;
+  }
+  /** Authenticate a live candidate without creating or changing a grant. */
+  async probeResume(identity: AssistanceIdentity, call: (r: AssistanceRequest) => Promise<AssistanceResult>): Promise<AssistanceResult> {
+    const authority = this.grant && (value(this.grant) as { resume?: ResumeAuthority }).resume;
+    if (!authority || this.disconnected || authority.expires <= this.now() || authority.consumer !== this.consumer || authority.application !== identity.application || authority.workspace !== identity.workspace || authority.supplier !== identity.supplier) { return result("refused"); }
+    try {
+      const nonce = crypto.randomUUID(), signature = await proof(authority.secret, "probe-request", identity, this.consumer, nonce);
+      const out = await call({ version: 1n, identity, consumer: this.consumer, operation: "probeResume", deadline: BigInt(this.now() + 10_000), token: null, epoch: null, payload: json({ nonce, proof: signature }) });
+      if (out.status === "unknown" && /^no authority provider attached for /.test(out.reason ?? "")) { return result("unavailable"); }
+      if (out.status === "unknown") { return out; }
+      if (out.status !== "available" || (value(out) as any)?.proof !== await proof(authority.secret, "probe-response", identity, this.consumer, nonce)) { return result("refused"); }
+      return result("available");
+    } catch { return result("unknown", null, { reason: "resume probe outcome unknown" }); }
+  }
   async resume(identity: AssistanceIdentity, call: (r: AssistanceRequest) => Promise<AssistanceResult>) {
     const r = this.grant && (value(this.grant) as { resume?: ResumeAuthority }).resume;
+    if (this.resumeUnresolved) { return result("unknown", null, { reason: "previous resume outcome unknown; explicit pairing required" }); }
     if (this.disconnected || this.resuming || this.attemptedResumes.has(identity.generation) || !r || r.consumer !== this.consumer || r.expires <= this.now() || r.application !== identity.application || r.workspace !== identity.workspace || r.supplier !== identity.supplier || identity.generation === this.identity.generation) return result("refused");
     this.attemptedResumes.add(identity.generation);
     this.resuming = true;
@@ -149,10 +189,14 @@ export class AssistanceConsumer {
     try {
       const nonce = crypto.randomUUID(), signature = await proof(r.secret, "request", identity, this.consumer, nonce);
       const out = await call({ version: 1n, identity, consumer: this.consumer, operation: "resume", deadline: BigInt(this.now() + 10_000), token: null, epoch: null, payload: json({ nonce, proof: signature }) });
+      if (out.status === "unknown") { this.resumeUnresolved = true; return out; }
       if (out.status !== "accepted" || !out.token || out.expires !== original?.expires || (value(out) as any).proof !== await proof(r.secret, "response", identity, this.consumer, nonce)) return result("refused");
-      if (this.disconnected || this.grant !== original) return result("refused");
+      if (this.disconnected || this.grant !== original) {
+        try { await call({ version: 1n, identity, consumer: this.consumer, operation: "end", deadline: BigInt(this.now() + 10_000), token: out.token, epoch: out.epoch, payload: json(null) }); } catch { /* The local grant remains revoked; remote confirmation is unavailable. */ }
+        return result("refused");
+      }
       this.identity = identity; this.call = call; this.adopt(out); return out;
-    } catch { return result("unknown", null, { reason: "resume outcome unknown; explicit pairing required" }); }
+    } catch { this.resumeUnresolved = true; return result("unknown", null, { reason: "resume outcome unknown; explicit pairing required" }); }
     finally { this.resuming = false; }
   }
   adopt(grant: AssistanceResult) { if (grant.status === "accepted" && grant.token && !this.ended.has(grant.token)) { this.grant = grant; } }

@@ -40,3 +40,44 @@ it("does not resume unproved/wrong consumer, changed launch, expired or stopped 
   next.enable(false); expect((await agent.resume(nextId, r => next.receive(r))).status).toBe("refused");
   now = 999999; next.enable(true); expect((await agent.resume(nextId, r => next.receive(r))).status).toBe("refused");
 });
+
+it("revokes a replacement that finishes resuming after the consumer ends", async () => {
+  let saved: ResumeAuthority | undefined, n = 0;
+  const runtime = { now: () => 100, id: () => `id-${++n}` };
+  const identity = { application: "app", workspace: "launch", supplier: "tab", generation: "one" };
+  const provider = { capabilities: { version: "1", actions: {} }, read: () => ({ revision: "r", sequence: 0 }), async prepare() { return () => {}; } };
+  const first = new AssistanceSupplier(identity, provider, runtime, { saveResume: r => { saved = r; } }); first.enable(true); first.setReady(true);
+  const consumer = new AssistanceConsumer(identity, "agent", r => first.receive(r), () => 100);
+  const offer = await consumer.offer(); first.accept(offer.token!); await consumer.status(offer.token!);
+  const secondId = { ...identity, generation: "two" };
+  const second = new AssistanceSupplier(secondId, provider, runtime, { resume: saved, saveResume: r => { saved = r; } }); second.enable(true); second.setReady(true);
+  let release!: () => void; let accepted!: () => void;
+  const acceptedPromise = new Promise<void>(resolve => { accepted = resolve; });
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  const pending = consumer.resume(secondId, async request => {
+    const response = await second.receive(request);
+    if (request.operation === "resume") { accepted(); await gate; }
+    return response;
+  });
+  await acceptedPromise;
+  expect(second.isPaired()).toBe(true);
+  await consumer.end(); release();
+  expect((await pending).status).toBe("refused");
+  expect(second.isPaired()).toBe(false); expect(saved).toBeUndefined();
+});
+
+it("does not retry an unknown resume outcome", async () => {
+  let saved: ResumeAuthority | undefined, n = 0, attempts = 0;
+  const runtime = { now: () => 100, id: () => `id-${++n}` };
+  const identity = { application: "app", workspace: "launch", supplier: "tab", generation: "one" };
+  const provider = { capabilities: { version: "1", actions: {} }, read: () => ({ revision: "r", sequence: 0 }), async prepare() { return () => {}; } };
+  const first = new AssistanceSupplier(identity, provider, runtime, { saveResume: r => { saved = r; } }); first.enable(true); first.setReady(true);
+  const consumer = new AssistanceConsumer(identity, "agent", r => first.receive(r), () => 100);
+  const offer = await consumer.offer(); first.accept(offer.token!); await consumer.status(offer.token!);
+  const next = { ...identity, generation: "two" };
+  const second = new AssistanceSupplier(next, provider, runtime, { resume: saved }); second.enable(true); second.setReady(true);
+  const call = async (request: Parameters<typeof second.receive>[0]) => { attempts++; await second.receive(request); throw Error("reply lost"); };
+  expect((await consumer.resume(next, call)).status).toBe("unknown");
+  expect((await consumer.resume(next, call)).status).toBe("unknown");
+  expect(attempts).toBe(1);
+});
