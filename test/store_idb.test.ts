@@ -188,8 +188,28 @@ it("reports a blocked schema upgrade instead of leaving the editor connecting fo
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+
   try { await expect(IndexedDbStoreEngine.open("old-tab", factory)).rejects.toThrow(/another tab/i); }
   finally { old.close(); }
   const reopened = await IndexedDbStoreEngine.open("old-tab", factory);
   reopened.close();
 }, 1000);
+
+it("reports a failed write to callers that need a durability acknowledgement", async () => {
+  const engine = await IndexedDbStoreEngine.open("closed-durability", new IDBFactory());
+  engine.close();
+  engine.open("draft-form").append({ origin: "tab", seq: 1, lamport: 1, prev: null, payload: new Uint8Array([1]) });
+  await expect(engine.flushChecked()).rejects.toThrow();
+});
+
+it("refreshes a draft instance written by another tab after this engine opened", async () => {
+  const factory = new IDBFactory();
+  const first = await IndexedDbStoreEngine.open("refresh-instance", factory);
+  const second = await IndexedDbStoreEngine.open("refresh-instance", factory);
+  first.open("draft").append({ origin: "one", seq: 1, lamport: 1, prev: null, payload: new Uint8Array([7]) });
+  await first.flushChecked();
+  expect(second.open("draft").all()).toHaveLength(0);
+  await second.refresh("draft");
+  expect(second.open("draft").all()[0].payload).toEqual(new Uint8Array([7]));
+  first.close(); second.close();
+});

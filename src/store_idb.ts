@@ -72,6 +72,7 @@ class IdbInstanceStore implements InstanceStore {
 
 export class IndexedDbStoreEngine implements StoreEngine {
   private readonly pending = new Set<Promise<unknown>>();
+  private durabilityFailure: unknown;
 
   private constructor(
     private readonly db: IDBDatabase,
@@ -156,6 +157,24 @@ export class IndexedDbStoreEngine implements StoreEngine {
     while (this.pending.size) { await Promise.all([...this.pending]); }
   }
 
+  /** Wait for writes and report any failure instead of claiming durability. */
+  async flushChecked(): Promise<void> {
+    await this.flush();
+    if (this.durabilityFailure !== undefined) { throw this.durabilityFailure; }
+  }
+
+  /** Reload one unmounted instance after its caller acquires exclusive ownership. */
+  async refresh(instanceKey: string): Promise<void> {
+    await this.flushChecked();
+    const tx = this.db.transaction([STORE, CHECKPOINTS], "readonly");
+    const [rows, checkpoint] = await Promise.all([
+      req<OpRow[]>(tx.objectStore(STORE).getAll() as IDBRequest<OpRow[]>),
+      req<{ instanceKey: string; value: unknown } | undefined>(tx.objectStore(CHECKPOINTS).get(instanceKey)),
+    ]);
+    const ops = rows.filter((row) => row.instanceKey === instanceKey).map((row) => row.op);
+    this.cache.set(instanceKey, new IdbInstanceStore(this, instanceKey, ops, checkpoint?.value));
+  }
+
   close(): void {
     this.db.close();
   }
@@ -164,26 +183,28 @@ export class IndexedDbStoreEngine implements StoreEngine {
   saveCheckpoint(instanceKey: string, ops: StoredOp[], value: unknown): void {
     try {
       const tx = this.db.transaction([STORE, CHECKPOINTS], "readwrite");
-      const done = transactionDone(tx).catch(() => { /* Previous durable checkpoint remains valid. */ });
+      const done = transactionDone(tx).catch((error: unknown) => { this.durabilityFailure ??= error; });
       for (const op of ops) { tx.objectStore(STORE).put({ instanceKey, origin: op.origin, seq: op.seq, op }); }
       tx.objectStore(CHECKPOINTS).put({ instanceKey, value });
       this.pending.add(done);
       void done.finally(() => this.pending.delete(done));
-    } catch { /* Keep the previous durable checkpoint; the in-memory draft remains. */ }
+    } catch (error) { this.durabilityFailure ??= error; }
   }
 
   /** store-internal write-through: fire-and-forget, tracked for flush(). */
   put(row: OpRow): void {
     try {
       const tx = this.db.transaction(STORE, "readwrite");
-      const p = transactionDone(tx).catch(() => {
+      const p = transactionDone(tx).catch((error: unknown) => {
         // persistence degrades (quota, closed db); memory keeps serving.
+        this.durabilityFailure ??= error;
       });
       tx.objectStore(STORE).put(row);
       this.pending.add(p);
       void p.finally(() => this.pending.delete(p));
-    } catch {
+    } catch (error) {
       // transaction refused (db closing): same stance.
+      this.durabilityFailure ??= error;
     }
   }
 }
