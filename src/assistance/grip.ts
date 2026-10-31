@@ -50,10 +50,29 @@ export class GripAssistance {
   read(pairing: string): DiscoveredValue[] {
     if (pairing !== this.pairing) { this.targets.clear(); this.pairing = pairing; }
     const out: DiscoveredValue[] = [], seen = new Set<string>();
+    let rootStart = 0, rootTruncated = false, totalTruncated = false;
+    const beginRoot = () => { rootStart = out.length; rootTruncated = false; };
     const excluded = (location: ValueLocation) => this.options.exclude?.(location) || location.role === "destination" && this.options.exclude?.({ ...location, context: location.ownerContext!, role: "owner" });
+    const limited = (location: ValueLocation): boolean => {
+      if (totalTruncated || rootTruncated) { return true; }
+      if (out.length >= 9999) {
+        out.push({ ...location, writable: false, type: "unsupported", error: "state projection truncated: total discovery limit reached" });
+        totalTruncated = true;
+        return true;
+      }
+      if (out.length - rootStart >= 512) {
+        out.push({ ...location, writable: false, type: "unsupported", error: "value truncated: per-grip discovery limit reached" });
+        rootTruncated = true;
+        return true;
+      }
+      if (location.path.length > 64) {
+        out.push({ ...location, writable: false, type: "unsupported", error: "value truncated: discovery depth limit reached" });
+        return true;
+      }
+      return false;
+    };
     const append = (location: ValueLocation, value: unknown, source: { context: object; tap: object; grip: GripKey; controller?: ValueController; binding?: object; owner?: object }, ancestors: Set<object>) => {
-      if (excluded(location)) return;
-      if (out.length >= 10000 || location.path.length > 64) throw Error("Discovery limit exceeded");
+      if (excluded(location) || limited(location)) { return; }
       const type = scalarType(value);
       if (type) {
         let ref: string | undefined;
@@ -76,8 +95,10 @@ export class GripAssistance {
       out.push({ ...location, writable: false, type: Array.isArray(value) ? "array" : "object" });
       const nextAncestors = new Set(ancestors).add(value);
       for (const key of Object.keys(value)) {
+        if (totalTruncated || rootTruncated) { break; }
         const child = { ...location, path: [...location.path, key] };
         if (excluded(child)) continue;
+        if (limited(child)) { continue; }
         const property = Object.getOwnPropertyDescriptor(value, key)!;
         if (forbidden.has(key) || !("value" in property)) {
           out.push({ ...child, writable: false, type: "unsupported", error: "unsupported property or accessor" }); continue;
@@ -90,8 +111,11 @@ export class GripAssistance {
       const context = node.get_context(); if (!context) continue;
       const maps = new Map<object, ReadonlyMap<GripKey, ValueController> | undefined>();
       for (const [grip, record] of node.producers) {
+        if (totalTruncated) { break; }
         const location: ValueLocation = { context: node.id, grip: grip.name, gripKey: grip.key, path: [], role: "owner", ownerContext: node.id, writeScope: "owner-shared" };
         if (excluded(location)) continue;
+        beginRoot();
+        if (limited(location)) { break; }
         const tap = record.tap as { getValueControllers?(): ReadonlyMap<GripKey, ValueController>; destinationParamGrips?: readonly GripKey[] };
         if (!maps.has(tap)) maps.set(tap, tap.getValueControllers?.());
         const controllers = maps.get(tap), original = controllers?.get(grip);
@@ -103,6 +127,7 @@ export class GripAssistance {
         // Existing destination bindings are authoritative. Never query/create a
         // consumer or walk parent paths to guess which provider won resolution.
         for (const [destination, binding] of record.getDestinations?.() ?? []) {
+          if (totalTruncated) { break; }
           if (this.options.excludeContext?.(destination.id) || !binding.getGrips().has(grip) || destination.resolvedProviders?.get(grip) !== node) continue;
           const destContext = destination.get_context(); if (!destContext) continue;
           const destLocation: ValueLocation = { ...location, context: destination.id, role: "destination", writeScope: destination === node ? "destination-local" : "owner-shared" };
@@ -112,6 +137,7 @@ export class GripAssistance {
           // from a destination. Parameter-dependent output controllers cannot
           // be inferred from a home controller and remain read-only here.
           const destController = tap.destinationParamGrips?.length ? undefined : controller;
+          beginRoot();
           append(destLocation, destController?.getLeafController ? destController.get() : drip.get(), { context: destContext, tap, grip, controller: destController, binding, owner: context }, new Set());
         }
       }

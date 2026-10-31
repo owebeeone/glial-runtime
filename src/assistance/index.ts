@@ -127,7 +127,10 @@ export class AssistanceSupplier {
     if (r.operation === "status" || o.status === "ended") { return this.status(o); }
     if (!this.permitted(o, r)) { return result("refused"); }
     const access = { token: o.token, epoch: o.epoch };
-    if (r.operation === "read") { return result("observed", this.provider.read(access)); }
+    if (r.operation === "read") {
+      try { return result("observed", this.provider.read(access)); }
+      catch (error) { return result("refused", null, { reason: `State projection failed: ${error instanceof Error ? error.message : "unknown error"}` }); }
+    }
     if (r.operation !== "invoke") { return result("unsupported"); }
     if (this.committing) { return result("busy"); }
     let input: { action: string; args: unknown; expected: Observation };

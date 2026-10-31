@@ -15,6 +15,14 @@ function fixture() {
   return { host, consumer, provider, identity, pair, now: (n: number) => { now = n; }, count: () => commits, selected: () => selected };
 }
 describe("assistance lifecycle and commit boundary", () => {
+  it("reports a state projection failure without calling it a malformed request", async () => {
+    const f = fixture();
+    await f.pair();
+    f.provider.read = () => { throw Error("Discovery limit exceeded"); };
+    const read = await f.consumer.read();
+    expect(read.status).toBe("refused");
+    expect(read.reason).toContain("Discovery limit exceeded");
+  });
   it("defaults off, requires concrete readiness and explicit consent, reads fresh, dispatches once, ends", async () => {
     const f = fixture(); expect((await f.consumer.offer()).status).toBe("unavailable");
     f.host.enable(true); expect((await f.consumer.offer()).status).toBe("unavailable");

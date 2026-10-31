@@ -28,6 +28,27 @@ function fixture() {
   const graph = { getGraph: () => nodes };
   return { graph, nodes, node, grip, controller, tap, get: () => state, id: () => `ref-${++seq}` };
 }
+it("bounds large values while still discovering later grips and marking the omitted data", () => {
+  const f = fixture();
+  f.controller.set({ items: Array.from({ length: 12000 }, (_, i) => i) });
+  const other = { name: "Other", key: "app:Other" };
+  const otherController = { get: () => "available", set: () => {}, update: () => {} };
+  f.node.producers.set(other, { tap: { getValueControllers: () => new Map([[other, otherController]]) } } as any);
+  const values = new GripAssistance(f.graph, { id: f.id }).read("pair");
+  expect(values.find(v => v.grip === "Working" && v.error?.includes("truncated"))).toBeDefined();
+  expect(values.find(v => v.grip === "Other" && v.value === "available")).toBeDefined();
+  expect(values.length).toBeLessThan(1000);
+});
+it("marks a full projection and stops at the total discovery bound", () => {
+  const f = fixture();
+  for (let i = 0; i < 11000; i++) {
+    const grip = { name: `Handle${i}`, key: `app:Handle${i}` };
+    f.node.producers.set(grip, { tap: { getValueControllers: () => new Map() } } as any);
+  }
+  const values = new GripAssistance(f.graph, { id: f.id }).read("pair");
+  expect(values).toHaveLength(10000);
+  expect(values.at(-1)?.error).toContain("total discovery limit");
+});
 it("read-only policy retains readable values, defaults other leaves on and revokes old references before commit", () => {
   const f = fixture(); let readonly = false;
   const a = new GripAssistance(f.graph, { id: f.id, readonly: x => readonly && x.path[0] === "drafts" });
