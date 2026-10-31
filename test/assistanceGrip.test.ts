@@ -1,6 +1,23 @@
 import { expect, it, vi } from "vitest";
 import { GripAssistance } from "../src/assistance/grip.ts";
 
+it("executes supplied JavaScript against the requested handle in its exact context", () => {
+  const f = fixture(), other = fixture(); other.node.id = "two"; f.nodes.set("two", other.node);
+  const handle = { name: "Tour.Tap", key: "app:Tour.Tap" };
+  const start = vi.fn(); const tap = { ...f.tap, start };
+  f.node.producers.set(handle, { tap } as any);
+  f.node.consumers.set(handle, { deref: () => ({ get: () => tap }) } as any);
+  const assistance = new GripAssistance(f.graph, { id: f.id });
+  const run = assistance.prepareJavaScript({ context: "one", gripKey: handle.key, source: "grip.start()" });
+  expect(start).not.toHaveBeenCalled(); run(); expect(start).toHaveBeenCalledOnce();
+  expect(() => assistance.prepareJavaScript({ context: "two", gripKey: handle.key, source: "grip.start()" })).toThrow();
+  expect(() => assistance.prepareJavaScript({ context: "one", gripKey: handle.key, source: "{" })).toThrow();
+  const excluded = new GripAssistance(f.graph, { id: f.id, exclude: l => l.gripKey === handle.key });
+  expect(() => excluded.prepareJavaScript({ context: "one", gripKey: handle.key, source: "grip.start()" })).toThrow();
+  const stale = assistance.prepareJavaScript({ context: "one", gripKey: handle.key, source: "grip.start()" });
+  f.node.producers.delete(handle); expect(() => stale()).toThrow(); expect(start).toHaveBeenCalledOnce();
+});
+
 function fixture() {
   let state: any = { left: "a", right: "b", drafts: { note: "editable" }, secret: { password: "hidden" } };
   const grip = { name: "Working", key: "app:Working" }, context = {};

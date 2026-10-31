@@ -16,6 +16,7 @@ const tools = [
   { name: "readState", description: "Fresh granted state projection; not presentation evidence.", inputSchema: object({ token: string }) },
   { name: "invokeAction", description: "Invoke a granted action once. Unknown requires manual handling.", inputSchema: object({ token: string, action: string, arguments: { type: "object" }, expected: object({ sequence: { type: "integer" }, revision: string }) }) },
   { name: "writeValue", description: "Write one discovered writable scalar reference using its normal controller. Read fresh state first. Unknown requires manual handling.", inputSchema: object({ token: string, ref: string, value: { type: ["string", "number", "boolean", "null"] }, expected: object({ sequence: { type: "integer" }, revision: string }) }) },
+  { name: "executeJavaScript", description: "Run synchronous JavaScript in the paired browser with the selected live GRIP value as grip. This has page privileges. Read fresh state first.", inputSchema: object({ token: string, context: string, gripKey: string, source: string, expected: object({ sequence: { type: "integer" }, revision: string }) }) },
   { name: "endPairing", description: "End locally immediately; report remote confirmation separately.", inputSchema: object({ token: string }) },
   { name: "abandonUnknown", description: "Manual continuation; does not establish cancellation or rollback.", inputSchema: object({ token: string }) },
 ];
@@ -57,6 +58,7 @@ export class AssistanceMcp {
     if (name === "readState") { return serializable(await c.read()); }
     if (name === "invokeAction") { return serializable(await c.invoke(args.action, args.arguments, args.expected)); }
     if (name === "writeValue") { return serializable(await c.invoke("writeValue", { ref: args.ref, value: args.value }, args.expected)); }
+    if (name === "executeJavaScript") { return serializable(await c.invoke("executeJavaScript", { context: args.context, gripKey: args.gripKey, source: args.source }, args.expected)); }
     if (name === "endPairing") { return serializable(await c.end(c.grant?.token ?? args.token)); }
     if (name === "abandonUnknown") { c.abandon(); return { status: "manually-abandoned", cancelled: false }; }
     throw Error("Unknown tool");

@@ -19,7 +19,10 @@ interface Node {
   readonly consumers: ReadonlyMap<GripKey, { deref(): { get(): unknown } | undefined }>;
   readonly resolvedProviders?: ReadonlyMap<GripKey, Node>;
 }
-export interface GripGraphPort { getGraph(): ReadonlyMap<string, Node> }
+export interface GripGraphPort {
+  getGraph(): ReadonlyMap<string, Node>;
+  query?(grip: GripKey, context: object): { get(): unknown };
+}
 export interface ValueLocation { context: string; grip: string; gripKey: string; path: string[]; role?: "owner" | "destination"; ownerContext?: string; writeScope?: "owner-shared" | "destination-local" }
 export interface DiscoveredValue extends ValueLocation {
   writable: boolean; type: string; ref?: string; value?: string | number | boolean | null; error?: string;
@@ -92,7 +95,7 @@ export class GripAssistance {
         const tap = record.tap as { getValueControllers?(): ReadonlyMap<GripKey, ValueController>; destinationParamGrips?: readonly GripKey[] };
         if (!maps.has(tap)) maps.set(tap, tap.getValueControllers?.());
         const controllers = maps.get(tap), original = controllers?.get(grip);
-        if (controllers && !original) continue; // Handle outputs are never data.
+        if (controllers && !original) { out.push({ ...location, writable: false, type: "handle" }); continue; }
         const controller = original && (this.options.controller?.(location, original) ?? original);
         const reader = controller ?? node.consumers.get(grip)?.deref();
         if (!reader) { out.push({ ...location, writable: false, type: "unavailable", error: "no published value at this context" }); }
@@ -131,6 +134,36 @@ export class GripAssistance {
       const target = resolve();
       if (specialized) specialized();
       else target.controller.update(previous => replaceLeaf(previous, target.location.path, args.value));
+    };
+  }
+
+  /** Compile without executing; resolve the live value again at commit time. */
+  prepareJavaScript(input: unknown): () => void {
+    const args = input as { context?: unknown; gripKey?: unknown; source?: unknown };
+    if (!args || typeof args.context !== "string" || typeof args.gripKey !== "string" || typeof args.source !== "string" || Object.keys(args).sort().join(",") !== "context,gripKey,source") { throw Error("Invalid JavaScript action"); }
+    const run = new Function("grip", `"use strict";\n${args.source}`) as (grip: unknown) => unknown;
+    const resolve = () => {
+      const node = [...new Set(this.graph.getGraph().values())].find(candidate => candidate.id === args.context);
+      if (!node || this.options.excludeContext?.(node.id)) { throw Error("Unknown or excluded context"); }
+      const grip = [...node.producers.keys(), ...node.consumers.keys()].find(candidate => candidate.key === args.gripKey);
+      if (!grip) { throw Error("Unknown GRIP in context"); }
+      const owner = node.producers.has(grip) ? node : node.resolvedProviders?.get(grip);
+      if (!owner || !owner.producers.has(grip) || this.options.excludeContext?.(owner.id)) { throw Error("GRIP provider is unavailable"); }
+      const location: ValueLocation = { context: node.id, grip: grip.name, gripKey: grip.key, path: [] };
+      const ownerLocation: ValueLocation = { ...location, context: owner.id };
+      if (this.options.exclude?.(location) || this.options.readonly?.(location) || this.options.exclude?.(ownerLocation) || this.options.readonly?.(ownerLocation)) { throw Error("GRIP excluded from assistance"); }
+      const context = node.get_context();
+      if (!context) { throw Error("Context is no longer available"); }
+      const reader = node.consumers.get(grip)?.deref() ?? this.graph.query?.(grip, context);
+      if (!reader) { throw Error("GRIP value is unavailable"); }
+      return { node, grip, context, reader, owner, record: owner.producers.get(grip) };
+    };
+    const original = resolve();
+    return () => {
+      const current = resolve();
+      if (current.node !== original.node || current.context !== original.context || current.grip !== original.grip || current.owner !== original.owner || current.record !== original.record) { throw Error("GRIP context changed"); }
+      const output = run(current.reader.get());
+      if (output && typeof (output as PromiseLike<unknown>).then === "function") { throw Error("Async JavaScript is not supported"); }
     };
   }
 }
