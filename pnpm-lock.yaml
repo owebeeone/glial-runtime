@@ -12,8 +12,8 @@ importers:
         specifier: ^0.1.1
         version: 0.1.1
       '@owebeeone/taut-shape':
-        specifier: file:../taut-shape-ts
-        version: file:../taut-shape-ts
+        specifier: ^0.12.0
+        version: 0.12.0
     devDependencies:
       '@owebeeone/grip-core':
         specifier: ^0.3.0
@@ -180,8 +180,8 @@ packages:
   '@owebeeone/grip-core@0.3.0':
     resolution: {integrity: sha512-QnMko8gjpt4SmEccQuaIyepe4Xl1X/qsthKiZzlEV8wGchrccgYdUTzHmtaVC84F1u2GSe0asF3SDMYs6epd+A==}
 
-  '@owebeeone/taut-shape@file:../taut-shape-ts':
-    resolution: {directory: ../taut-shape-ts, type: directory}
+  '@owebeeone/taut-shape@0.12.0':
+    resolution: {integrity: sha512-fxKHXIQD9xidtTfp8eTxjGBtYXyDh4LMQWGFgVm6tD7SPxTyJRhLxCk8f9+9153inlqeRefh3jEVXBry/j5L1g==}
     engines: {node: '>=22'}
     hasBin: true
 
@@ -613,7 +613,7 @@ snapshots:
 
   '@owebeeone/grip-core@0.3.0': {}
 
-  '@owebeeone/taut-shape@file:../taut-shape-ts': {}
+  '@owebeeone/taut-shape@0.12.0': {}
 
   '@rollup/rollup-android-arm-eabi@4.62.2':
     optional: true
