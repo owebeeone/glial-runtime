@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@owebeeone/glade-decl':
-        specifier: ^0.1.1
-        version: 0.1.1
+        specifier: ^0.2.0
+        version: 0.2.0
       '@owebeeone/taut-shape':
         specifier: ^0.12.0
         version: 0.12.0
@@ -174,8 +174,8 @@ packages:
   '@jridgewell/sourcemap-codec@1.5.5':
     resolution: {integrity: sha512-cYQ9310grqxueWbl+WuIUIaiUaDcj7WOq5fVhEljNVgRfOUhY9fy2zTvfoqWsnebh8Sl70VScFbICvJnLKB0Og==}
 
-  '@owebeeone/glade-decl@0.1.1':
-    resolution: {integrity: sha512-nKKhpsnG/QQRClf5J5+7QFFk1XbcNThVMIvsgv1dw/5EB1JcIphWKqNg3ZUwhQX9OJDrufyjst0tg6mdkOVYow==}
+  '@owebeeone/glade-decl@0.2.0':
+    resolution: {integrity: sha512-6iHR9jYTszBBUXg4lArJEKWwF06MrqmhdFnSeQOGse8J61+UxUUJSxZqbaqiqfLWi6WJgvq1tsp6Mq26kSJPIg==}
 
   '@owebeeone/grip-core@0.3.0':
     resolution: {integrity: sha512-QnMko8gjpt4SmEccQuaIyepe4Xl1X/qsthKiZzlEV8wGchrccgYdUTzHmtaVC84F1u2GSe0asF3SDMYs6epd+A==}
@@ -609,7 +609,7 @@ snapshots:
 
   '@jridgewell/sourcemap-codec@1.5.5': {}
 
-  '@owebeeone/glade-decl@0.1.1': {}
+  '@owebeeone/glade-decl@0.2.0': {}
 
   '@owebeeone/grip-core@0.3.0': {}
 

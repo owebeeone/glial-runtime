@@ -28,7 +28,7 @@
     "check:release": "node scripts/check-release.mjs"
   },
   "dependencies": {
-    "@owebeeone/glade-decl": "^0.1.1",
+    "@owebeeone/glade-decl": "^0.2.0",
     "@owebeeone/taut-shape": "^0.12.0"
   },
   "peerDependencies": {
